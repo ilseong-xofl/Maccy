@@ -1,6 +1,13 @@
 import AppKit.NSImage
 import ImageIO
 
+/// A single decoded carousel page, with metadata from its original source.
+struct ClipboardPreviewImage {
+  let image: NSImage
+  let pixelSize: NSSize
+  let sourceByteCount: Int64?
+}
+
 /// Display-only sources. Never add a rendered thumbnail to the clipboard payload.
 enum ClipboardImageSource: Sendable {
   case data(Data)
@@ -17,7 +24,9 @@ enum ClipboardImageSource: Sendable {
   nonisolated static func loadFirst(_ sources: [Self], maxPixelSize: Int = 2048) async -> Preview? {
     for source in sources {
       guard !Task.isCancelled else { return nil }
-      if let preview = source.load(maxPixelSize: maxPixelSize) { return preview }
+      if let preview = source.load(maxPixelSize: maxPixelSize) {
+        return Task.isCancelled ? nil : preview
+      }
     }
     return nil
   }

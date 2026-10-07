@@ -42,6 +42,8 @@ enum KeyChord: CaseIterable {
   case togglePreview
   case spacePreview
   case focusSearch
+  case previousPreviewImage
+  case nextPreviewImage
   case unknown
 
   init(_ event: NSEvent?) {
@@ -122,6 +124,10 @@ enum KeyChord: CaseIterable {
       self = .openPreferences
     case (.f, [.command]):
       self = .focusSearch
+    case (.leftArrow, []):
+      self = .previousPreviewImage
+    case (.rightArrow, []):
+      self = .nextPreviewImage
     case (.space, []):
       self = .spacePreview
     case (.return, _),

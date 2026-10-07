@@ -14,9 +14,14 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     let imageSize: NSSize?
     let imageWidth: CGFloat
     let nonImageHeight: CGFloat
+    var imageIndex: Int = 0
+    var presentationID: UUID?
   }
 
   private(set) var isVisible = false
+  private(set) var selectedImageIndex = 0
+  private(set) var presentationID = UUID()
+  @ObservationIgnored private var previewedItemID: UUID?
   @ObservationIgnored private(set) var window: NSPanel?
   @ObservationIgnored private(set) var sessionSize = DetachedPreviewController.defaultSize
   @ObservationIgnored private var automaticallyFitsImage = true
@@ -51,6 +56,8 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     if window == nil { makeWindow() }
     sessionSize = Self.defaultSize
     automaticallyFitsImage = true
+    resetImageSelection()
+    presentationID = UUID()
     isVisible = true
     reposition()
     window?.makeKeyAndOrderFront(nil)
@@ -72,11 +79,33 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
       close(restoreListFocus: window?.isKeyWindow == true)
       return
     }
+    if previewedItemID != AppState.shared.navigator.leadHistoryItem?.id { resetImageSelection() }
     reposition()
   }
 
+  @discardableResult
+  func navigateImages(by offset: Int) -> Bool {
+    guard isVisible, !AppState.shared.isEditingItem,
+          let item = AppState.shared.navigator.leadHistoryItem, item.previewImageCount > 1 else { return false }
+    if previewedItemID != item.id { resetImageSelection() }
+    let nextIndex = min(max(selectedImageIndex + offset, 0), item.previewImageCount - 1)
+    if nextIndex != selectedImageIndex {
+      contentMetrics = nil
+      selectedImageIndex = nextIndex
+    }
+    return true
+  }
+
+  private func resetImageSelection() {
+    previewedItemID = AppState.shared.navigator.leadHistoryItem?.id
+    selectedImageIndex = 0
+    contentMetrics = nil
+  }
+
   func contentLayoutDidChange(_ metrics: ContentMetrics) {
-    guard metrics.itemID == AppState.shared.navigator.leadHistoryItem?.id else { return }
+    guard metrics.itemID == AppState.shared.navigator.leadHistoryItem?.id,
+          metrics.imageIndex == selectedImageIndex,
+          metrics.presentationID == nil || metrics.presentationID == presentationID else { return }
     contentMetrics = metrics
     reposition()
   }
@@ -94,6 +123,7 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     let nativeChromeHeight = maximumFrame.height - window.contentRect(forFrameRect: maximumFrame).height
     if automaticallyFitsImage, let metrics = contentMetrics,
        metrics.itemID == AppState.shared.navigator.leadHistoryItem?.id,
+       metrics.imageIndex == selectedImageIndex,
        abs(metrics.imageWidth - (maximumFrame.width - SlideoutContentView.horizontalPadding * 2)) < 1 {
       requestedSize = Self.automaticSize(imageSize: metrics.imageSize, maximumSize: maximumFrame.size,
                                          imageWidth: metrics.imageWidth,
@@ -188,6 +218,9 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
       case .spacePreview, .close, .togglePreview:
         close(restoreListFocus: true)
         return nil
+      case .previousPreviewImage, .nextPreviewImage:
+        if let editor = event.window?.firstResponder as? NSTextView, editor.isEditable { return event }
+        return navigateImages(by: KeyChord(event) == .nextPreviewImage ? 1 : -1) ? nil : event
       case .moveToNext:
         AppState.shared.navigator.highlightNext()
         return nil

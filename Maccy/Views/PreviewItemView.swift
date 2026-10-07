@@ -5,18 +5,42 @@ struct PreviewItemView: View {
   private static let largeTextThreshold = 1_000
   private static let contentSpacing: CGFloat = 10
 
+  private struct ImageRequest: Hashable {
+    let itemID: UUID
+    let index: Int
+    let presentationID: UUID?
+  }
+
+  private struct LoadedPage {
+    let request: ImageRequest
+    let page: ClipboardPreviewImage?
+  }
+
   var item: HistoryItemDecorator
+  var imageIndex: Int = 0
+  var presentationID: UUID?
   var surroundingHeight: CGFloat = 0
+  var onNavigate: (Int) -> Void = { _ in }
   var onLayout: (DetachedPreviewController.ContentMetrics) -> Void = { _ in }
   @State private var metadataHeight: CGFloat = 114
+  @State private var loadedPage: LoadedPage?
+
+  private var imageRequest: ImageRequest {
+    ImageRequest(itemID: item.id, index: imageIndex, presentationID: presentationID)
+  }
+
+  private var currentPage: ClipboardPreviewImage? {
+    loadedPage?.request == imageRequest ? loadedPage?.page : nil
+  }
 
   var body: some View {
     GeometryReader { geometry in
       let informationHeight = min(metadataHeight, max(0, geometry.size.height - Self.contentSpacing - 24))
       let availableHeight = max(0, geometry.size.height - informationHeight - Self.contentSpacing)
       let metrics = DetachedPreviewController.ContentMetrics(
-        itemID: item.id, imageSize: item.imagePixelSize, imageWidth: geometry.size.width,
-        nonImageHeight: metadataHeight + Self.contentSpacing + surroundingHeight)
+        itemID: item.id, imageSize: currentPage?.pixelSize, imageWidth: geometry.size.width,
+        nonImageHeight: metadataHeight + Self.contentSpacing + surroundingHeight,
+        imageIndex: imageIndex, presentationID: presentationID)
 
       VStack(spacing: Self.contentSpacing) {
         previewContent
@@ -37,32 +61,46 @@ struct PreviewItemView: View {
       }
       .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
       .onChange(of: metrics, initial: true) { _, value in
+        // Keep the current frame while another page loads, and never size a
+        // new page using the previous image's dimensions.
+        guard !item.hasImage || currentPage != nil else { return }
         // AppKit resizing happens after this SwiftUI layout pass has finished.
         DispatchQueue.main.async { onLayout(value) }
       }
+    }
+    .task(id: imageRequest) {
+      guard item.hasImage else { return }
+      let request = imageRequest
+      let page = await item.asyncGetPreviewPage(at: request.index)
+      guard !Task.isCancelled else { return }
+      loadedPage = LoadedPage(request: request, page: page)
     }
   }
 
   @ViewBuilder
   private var previewContent: some View {
     if item.hasImage {
-      AsyncView<NSImage?, _, _>(id: item.id) {
-        await item.asyncGetPreviewImage()
-      } content: { image in
-        if let image {
-          Image(nsImage: image)
+      ZStack {
+        if let page = currentPage {
+          Image(nsImage: page.image)
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .clipShape(.rect(cornerRadius: 4))
-        } else {
+            .accessibilityLabel("Image \(imageIndex + 1) of \(item.previewImageCount)")
+            .accessibilityIdentifier("previewImage")
+        } else if loadedPage?.request == imageRequest {
           imagePlaceholder {
             Image(systemName: "photo.badge.exclamationmark")
               .symbolRenderingMode(.multicolor)
           }
+        } else {
+          imagePlaceholder { ProgressView() }
         }
-      } placeholder: {
-        imagePlaceholder { ProgressView() }
+
+        if item.previewImageCount > 1 {
+          carouselControls
+        }
       }
     } else if item.previewText.byteCount >= Self.largeTextThreshold {
       LargeTextView(text: item.previewText.string)
@@ -81,6 +119,52 @@ struct PreviewItemView: View {
     }
   }
 
+  private var carouselControls: some View {
+    ZStack(alignment: .bottom) {
+      HStack {
+        carouselButton("Previous image", symbol: "chevron.left", offset: -1,
+                       disabled: imageIndex == 0, identifier: "previewPreviousImage")
+        Spacer()
+        carouselButton("Next image", symbol: "chevron.right", offset: 1,
+                       disabled: imageIndex >= item.previewImageCount - 1, identifier: "previewNextImage")
+      }
+      .padding(.horizontal, 8)
+      .frame(maxHeight: .infinity)
+
+      Text(verbatim: "\(imageIndex + 1) / \(item.previewImageCount)")
+        .font(.system(size: 12, weight: .semibold))
+        .monospacedDigit()
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.black.opacity(0.6), in: Capsule())
+        .padding(.bottom, 8)
+        .accessibilityIdentifier("previewImageCounter")
+        .allowsHitTesting(false)
+    }
+  }
+
+  private func carouselButton(_ label: String, symbol: String, offset: Int,
+                              disabled: Bool, identifier: String) -> some View {
+    Button {
+      onNavigate(offset)
+    } label: {
+      Image(systemName: symbol)
+        .font(.system(size: 15, weight: .semibold))
+        .frame(width: 34, height: 34)
+        .contentShape(Circle())
+        .background(.regularMaterial, in: Circle())
+        .overlay(Circle().strokeBorder(.primary.opacity(0.1)))
+    }
+    .buttonStyle(.plain)
+    .focusable(false)
+    .disabled(disabled)
+    .opacity(disabled ? 0.35 : 1)
+    .help(label)
+    .accessibilityLabel(label)
+    .accessibilityIdentifier(identifier)
+  }
+
   private func imagePlaceholder<Content: View>(@ViewBuilder content: () -> Content) -> some View {
     ZStack {
       Color.primary.opacity(0.04)
@@ -91,10 +175,14 @@ struct PreviewItemView: View {
 
   private var metadata: some View {
     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-      if let size = item.imagePixelSize {
+      if item.hasImage {
         metadataRow("Dimensions") {
-          Text(verbatim: "\(Int(size.width)) × \(Int(size.height))")
-            .monospacedDigit()
+          if let size = currentPage?.pixelSize {
+            Text(verbatim: "\(Int(size.width)) × \(Int(size.height))")
+              .monospacedDigit()
+          } else {
+            Text(verbatim: "—")
+          }
         }
       }
 
@@ -113,8 +201,17 @@ struct PreviewItemView: View {
       }
 
       metadataRow("Clipping Size") {
-        Text(ByteCountFormatter.string(fromByteCount: item.clippingByteCount, countStyle: .file))
-          .monospacedDigit()
+        if item.hasImage {
+          if let byteCount = currentPage?.sourceByteCount {
+            Text(ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file))
+              .monospacedDigit()
+          } else {
+            Text(verbatim: "—")
+          }
+        } else {
+          Text(ByteCountFormatter.string(fromByteCount: item.clippingByteCount, countStyle: .file))
+            .monospacedDigit()
+        }
       }
     }
     .font(.system(size: 14))

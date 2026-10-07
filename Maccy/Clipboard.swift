@@ -100,8 +100,14 @@ class Clipboard {
     // Use writeObjects for file URLs so that multiple files that are copied actually work.
     // Only do this for file URLs because it causes an issue with some other data types (like formatted text)
     // where the item is pasted more than once.
-    let fileURLItems: [NSPasteboardItem] = contents.compactMap { item in
-      guard item.type == NSPasteboard.PasteboardType.fileURL.rawValue else { return nil }
+    var remainingFileContents = contents.filter { $0.type == NSPasteboard.PasteboardType.fileURL.rawValue }
+    let orderedFileContents = item.fileURLs.compactMap { url -> HistoryItemContent? in
+      guard let index = remainingFileContents.firstIndex(where: {
+        $0.value.flatMap { URL(dataRepresentation: $0, relativeTo: nil, isAbsolute: true) } == url
+      }) else { return nil }
+      return remainingFileContents.remove(at: index)
+    } + remainingFileContents
+    let fileURLItems: [NSPasteboardItem] = orderedFileContents.compactMap { item in
       guard let value = item.value else { return nil }
       let pasteItem = NSPasteboardItem()
       pasteItem.setData(value, forType: NSPasteboard.PasteboardType(item.type))
@@ -234,8 +240,8 @@ class Clipboard {
     }
 
     // Reading NSURL objects redeems the pasteboard's file-access grant. Preserve only
-    // read access for a single image so its preview can be loaded after a restart.
-    if historyItem.fileURLs.count == 1,
+    // read access for every copied image so previews can be loaded after a restart.
+    if !historyItem.fileURLs.isEmpty,
        let urls = pasteboard.readObjects(forClasses: [NSURL.self],
                                         options: [.urlReadingFileURLsOnly: true]) as? [URL] {
       historyItem.rememberPreviewImageAccess(from: urls)

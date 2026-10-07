@@ -16,10 +16,13 @@ struct SlideoutContentView: View {
         .readHeight($toolbarHeight)
 
       if let item = appState.navigator.leadHistoryItem {
-        PreviewItemView(item: item, surroundingHeight: toolbarHeight + 6 + 6 + 3,
+        PreviewItemView(item: item, imageIndex: appState.preview.selectedImageIndex,
+                        presentationID: appState.preview.presentationID,
+                        surroundingHeight: toolbarHeight + 6 + 6 + 3,
+                        onNavigate: { appState.preview.navigateImages(by: $0) },
                         onLayout: appState.preview.contentLayoutDidChange)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .id(item.id)
+          .id("\(item.id)-\(appState.preview.presentationID)")
       } else if let pasteStack = appState.history.pasteStack,
         appState.navigator.pasteStackSelected {
         PasteStackPreviewView(pasteStack: pasteStack)

@@ -189,13 +189,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       item.lastCopiedAt = item.firstCopiedAt
       item.title = item.generateTitle()
     }
-    // Optional file-URL-only fixture exercises Finder-style copies without touching the system clipboard.
-    if let argument = CommandLine.arguments.firstIndex(of: "--preview-image"),
-       CommandLine.arguments.indices.contains(argument + 1) {
-      let url = URL(fileURLWithPath: CommandLine.arguments[argument + 1])
-      let item = HistoryItem(contents: [HistoryItemContent(type: NSPasteboard.PasteboardType.fileURL.rawValue,
-                                                         value: url.dataRepresentation)])
+    // Optional file-URL-only fixtures exercise Finder-style copies without touching the system clipboard.
+    let arguments = CommandLine.arguments
+    for (argument, flag) in arguments.enumerated() where flag == "--preview-image" || flag == "--preview-images" {
+      let paths = arguments.dropFirst(argument + 1).prefix { !$0.hasPrefix("--") }
+      let urls = (flag == "--preview-image" ? Array(paths.prefix(1)) : Array(paths)).map {
+        URL(fileURLWithPath: $0)
+      }
+      guard !urls.isEmpty else { continue }
+      let item = HistoryItem(contents: urls.map {
+        HistoryItemContent(type: NSPasteboard.PasteboardType.fileURL.rawValue, value: $0.dataRepresentation)
+      })
       context.insert(item)
+      item.rememberPreviewImageAccess(from: urls)
       item.application = "com.apple.finder"
       item.firstCopiedAt = timestamp.addingTimeInterval(1)
       item.lastCopiedAt = item.firstCopiedAt
@@ -211,6 +217,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   #endif
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    #if DEBUG
+    // UI tools can send a reopen event while focusing the demo's preview window.
+    // Keep its fixtures visible instead of toggling away the window under test.
+    if Self.isPreviewDemo {
+      if !panel.isPresented { panel.open(height: AppState.shared.popup.height, at: .center) }
+      return true
+    }
+    #endif
     panel.toggle(height: AppState.shared.popup.height)
     return true
   }

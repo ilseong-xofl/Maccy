@@ -41,18 +41,24 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     return url.deletingPathExtension().lastPathComponent
   }
 
-  var hasImage: Bool { thumbnailImage != nil || !item.previewImageSources.isEmpty }
+  var hasImage: Bool { thumbnailImage != nil || previewImageCount > 0 }
+  var previewImageCount: Int { item.previewImagePages.count }
   var hasFileURLs: Bool { !item.fileURLs.isEmpty }
   var hasPlainText: Bool { item.text != nil }
   var hasRichText: Bool { item.rtf != nil || item.html != nil }
 
   var thumbnailImageGenerationTask: Task<Void, Never>?
   private var imageGenerationID = UUID()
+  private var previewPageCache: [Int: ClipboardPreviewImage] = [:]
+  private var previewPageCacheOrder: [Int] = []
+  private var previewPageLoads: [Int: (id: UUID, task: Task<ClipboardImageSource.Preview?, Never>)] = [:]
+  private var previewPageLoadOrder: [Int] = []
   var previewImage: NSImage?
   private(set) var imagePixelSize: NSSize?
   private var imageSourceByteCount: Int64?
   private(set) var previewText = SizedString("")
   var thumbnailImage: NSImage?
+  private(set) var thumbnailImages: [NSImage] = []
   var applicationImage: ApplicationImage
 
   // 10k characters seems to be more than enough on large displays
@@ -86,6 +92,10 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   // Describe the complete item independently of its potentially truncated visual content.
   var accessibilityLabel: String {
     var parts: [String] = []
+    if previewImageCount > 1 {
+      parts.append(String(format: NSLocalizedString("history_item_image_count_accessibility_label",
+                                                    value: "%ld images", comment: ""), previewImageCount))
+    }
     if let size = imagePixelSize {
       parts.append(
         String(
@@ -129,20 +139,27 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   @MainActor
   func ensureThumbnailImage() {
     guard thumbnailImage == nil, thumbnailImageGenerationTask == nil else { return }
-    let sources = item.previewImageSources
-    guard !sources.isEmpty else { return }
+    let pages = item.previewImagePages
+    guard !pages.isEmpty else { return }
     let generationID = imageGenerationID
     thumbnailImageGenerationTask = Task { [weak self] in
-      let result = await ClipboardImageSource.loadFirst(sources)
-      guard !Task.isCancelled, let self, self.imageGenerationID == generationID else { return }
+      for (index, sources) in pages.prefix(3).enumerated() {
+        let result = await ClipboardImageSource.loadFirst(sources, maxPixelSize: pages.count == 1 ? 2048 : 1024)
+        guard !Task.isCancelled, let self, self.imageGenerationID == generationID else { return }
+        guard let result else { continue }
+        let page = Self.previewPage(result)
+        self.thumbnailImages.append(page.image)
+        self.thumbnailImage = self.thumbnailImages.first
+        if index == 0 {
+          self.imagePixelSize = page.pixelSize
+          self.imageSourceByteCount = page.sourceByteCount
+          self.previewImage = page.image
+          if pages.count == 1 { self.cachePreviewPage(page, at: 0) }
+        }
+        if let bookmark = result.refreshedBookmark { self.item.refreshPreviewImageBookmark(bookmark, at: index) }
+      }
+      guard let self, self.imageGenerationID == generationID else { return }
       self.thumbnailImageGenerationTask = nil
-      guard let result else { return }
-      let image = NSImage(cgImage: result.image, size: NSSize(width: result.image.width, height: result.image.height))
-      self.imagePixelSize = result.pixelSize
-      self.imageSourceByteCount = result.sourceByteCount
-      self.thumbnailImage = image
-      self.previewImage = image
-      if let bookmark = result.refreshedBookmark { self.item.previewImageBookmark = bookmark }
     }
   }
 
@@ -153,20 +170,82 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
 
   @MainActor
   func asyncGetPreviewImage() async -> NSImage? {
-    if let image = previewImage {
-      return image
+    await asyncGetPreviewPage(at: 0)?.image
+  }
+
+  @MainActor
+  func asyncGetPreviewPage(at index: Int) async -> ClipboardPreviewImage? {
+    let pages = item.previewImagePages
+    guard pages.indices.contains(index), !Task.isCancelled else { return nil }
+    if let cached = previewPageCache[index] {
+      cachePreviewPage(cached, at: index)
+      return cached
     }
-    ensurePreviewImage()
-    await thumbnailImageGenerationTask?.value
-    return previewImage
+
+    let generationID = imageGenerationID
+    let load: (id: UUID, task: Task<ClipboardImageSource.Preview?, Never>)
+    if let pending = previewPageLoads[index] {
+      load = pending
+    } else {
+      let sources = pages[index]
+      load = (UUID(), Task { await ClipboardImageSource.loadFirst(sources) })
+      previewPageLoads[index] = load
+      previewPageLoadOrder.append(index)
+      // Bound simultaneous work as well as retained pages when keys are pressed rapidly.
+      while previewPageLoadOrder.count > 2 {
+        let oldest = previewPageLoadOrder.removeFirst()
+        previewPageLoads.removeValue(forKey: oldest)?.task.cancel()
+      }
+    }
+
+    let result = await load.task.value
+    guard !Task.isCancelled, imageGenerationID == generationID else { return nil }
+    // Another waiter for this page may have already promoted this same load into the cache.
+    if let cached = previewPageCache[index] { return cached }
+    guard previewPageLoads[index]?.id == load.id else { return nil }
+    previewPageLoads[index] = nil
+    previewPageLoadOrder.removeAll { $0 == index }
+    guard let result else { return nil }
+    let page = Self.previewPage(result)
+    cachePreviewPage(page, at: index)
+    if index == 0 {
+      previewImage = page.image
+      imagePixelSize = page.pixelSize
+      imageSourceByteCount = page.sourceByteCount
+    }
+    if let bookmark = result.refreshedBookmark { item.refreshPreviewImageBookmark(bookmark, at: index) }
+    return page
+  }
+
+  private static func previewPage(_ result: ClipboardImageSource.Preview) -> ClipboardPreviewImage {
+    ClipboardPreviewImage(
+      image: NSImage(cgImage: result.image, size: NSSize(width: result.image.width, height: result.image.height)),
+      pixelSize: result.pixelSize,
+      sourceByteCount: result.sourceByteCount
+    )
+  }
+
+  private func cachePreviewPage(_ page: ClipboardPreviewImage, at index: Int) {
+    previewPageCache[index] = page
+    previewPageCacheOrder.removeAll { $0 == index }
+    previewPageCacheOrder.append(index)
+    while previewPageCacheOrder.count > 2 {
+      previewPageCache.removeValue(forKey: previewPageCacheOrder.removeFirst())
+    }
   }
 
   @MainActor
   func cleanupImages() {
     thumbnailImageGenerationTask?.cancel()
     thumbnailImageGenerationTask = nil
+    previewPageLoads.values.forEach { $0.task.cancel() }
+    previewPageLoads = [:]
+    previewPageLoadOrder = []
+    previewPageCache = [:]
+    previewPageCacheOrder = []
     imageGenerationID = UUID()
-    thumbnailImage?.recache()
+    thumbnailImages.forEach { $0.recache() }
+    thumbnailImages = []
     previewImage?.recache()
     thumbnailImage = nil
     previewImage = nil

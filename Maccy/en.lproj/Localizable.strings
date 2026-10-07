@@ -21,5 +21,6 @@
 "history_item_pinned_accessibility_value" = "Pinned";
 "history_item_selected_accessibility_value" = "Selected, %d of %d";
 "history_item_image_accessibility_label_no_app" = "Image, %dx%d";
+"history_item_image_count_accessibility_label" = "%ld images";
 "history_item_image_accessibility_generic" = "Image";
 "toolbar_remove_paste_stack_action" = "Stop paste stack";

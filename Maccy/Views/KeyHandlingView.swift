@@ -160,6 +160,10 @@ struct KeyHandlingView<Content: View>: View {
         case .focusSearch:
           appState.requestKeyboardFocus(.search)
           return .handled
+        case .previousPreviewImage, .nextPreviewImage:
+          guard keyboardFocus != .search else { return .ignored }
+          let offset = KeyChord(NSApp.currentEvent) == .nextPreviewImage ? 1 : -1
+          return appState.preview.navigateImages(by: offset) ? .handled : .ignored
         case .spacePreview:
           guard keyboardFocus != .search else { return .ignored }
           appState.preview.togglePreview()

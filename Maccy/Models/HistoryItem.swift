@@ -72,6 +72,9 @@ class HistoryItem {
   var title = ""
   // Read-only access to a copied image file; separate from the original pasteboard contents.
   var previewImageBookmark: Data?
+  // SwiftData relationships are unordered. Keep file order and preview access together,
+  // without replacing any of the original pasteboard representations.
+  var previewImageFiles: Data?
 
   @Relationship(deleteRule: .cascade, inverse: \HistoryItemContent.item)
   var contents: [HistoryItemContent] = []
@@ -82,6 +85,7 @@ class HistoryItem {
     self.firstCopiedAt = firstCopiedAt
     self.lastCopiedAt = lastCopiedAt
     self.contents = contents
+    rememberFileOrder()
   }
 
   func supersedes(_ item: HistoryItem) -> Bool {
@@ -96,7 +100,7 @@ class HistoryItem {
 
   @MainActor
   func generateTitle() -> String {
-    let pasteboardImageData = contentData(Self.imageTypes)
+    let pasteboardImageData = previewImagePages.isEmpty ? nil : contentData(Self.imageTypes)
     let universalClipboardImageURL = universalClipboardImage ? fileURLs.first : nil
     guard pasteboardImageData == nil && universalClipboardImageURL == nil else {
       Task {
@@ -153,8 +157,7 @@ class HistoryItem {
       return []
     }
 
-    return allContentData([.fileURL])
-      .compactMap { URL(dataRepresentation: $0, relativeTo: nil, isAbsolute: true) }
+    return previewFileEntries.map(\.url)
   }
 
   var htmlData: Data? { contentData([.html]) }
@@ -178,28 +181,92 @@ class HistoryItem {
 
   /// Sources used only for rendering. File copies must remain file copies when pasted.
   var previewImageSources: [ClipboardImageSource] {
+    previewImagePages.first ?? []
+  }
+
+  /// Alternative representations belong to one page; separate image files are separate pages.
+  var previewImagePages: [[ClipboardImageSource]] {
+    let files = universalClipboardText ? [] : previewFileEntries
+    if files.count > 1 {
+      guard files.allSatisfy({ Self.isLocalImageURL($0.url) }) else { return [] }
+      return files.map { [.file($0.url, bookmark: $0.bookmark)] }
+    }
+
     var sources: [ClipboardImageSource] = Self.imageTypes.flatMap { type in
       allContentData([type]).filter { !$0.isEmpty }.map { .data($0) }
     }
-    // Multiple copied files keep their full file list; a single thumbnail would hide that information.
-    let urls = fileURLs
-    if urls.count == 1, let url = urls.first, url.isFileURL,
-       UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true {
-      sources.append(.file(url, bookmark: previewImageBookmark))
+    if let file = files.first, Self.isLocalImageURL(file.url) {
+      sources.append(.file(file.url, bookmark: file.bookmark ?? previewImageBookmark))
     }
-    return sources
+    return sources.isEmpty ? [] : [sources]
   }
 
   func rememberPreviewImageAccess(from urls: [URL]) {
-    guard fileURLs.count == 1, let copiedURL = fileURLs.first,
-          UTType(filenameExtension: copiedURL.pathExtension)?.conforms(to: .image) == true,
-          let url = urls.first(where: { $0.standardizedFileURL == copiedURL.standardizedFileURL }) else { return }
-    let accessed = url.startAccessingSecurityScopedResource()
-    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-    if let bookmark = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
-                                           includingResourceValuesForKeys: nil, relativeTo: nil) {
-      previewImageBookmark = bookmark
+    var files = previewFileEntries
+    for index in files.indices {
+      let copiedURL = files[index].url
+      guard Self.isLocalImageURL(copiedURL),
+            let url = urls.first(where: { $0.standardizedFileURL == copiedURL.standardizedFileURL }) else { continue }
+      let accessed = url.startAccessingSecurityScopedResource()
+      defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+      if let bookmark = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+                                             includingResourceValuesForKeys: nil, relativeTo: nil) {
+        files[index].bookmark = bookmark
+      }
     }
+    storePreviewFiles(files)
+  }
+
+  func inheritPreviewImageAccess(from previous: HistoryItem) {
+    let oldFiles = previous.previewFileEntries
+    var files = previewFileEntries
+    for index in files.indices where files[index].bookmark == nil {
+      files[index].bookmark = oldFiles.first(where: {
+        $0.url.standardizedFileURL == files[index].url.standardizedFileURL
+      })?.bookmark
+    }
+    if previewImageBookmark == nil { previewImageBookmark = previous.previewImageBookmark }
+    storePreviewFiles(files)
+  }
+
+  func refreshPreviewImageBookmark(_ bookmark: Data, at page: Int) {
+    var files = previewFileEntries
+    guard files.indices.contains(page) else { return }
+    files[page].bookmark = bookmark
+    storePreviewFiles(files)
+  }
+
+  private struct PreviewFile: Codable {
+    let url: URL
+    var bookmark: Data?
+  }
+
+  private var previewFileEntries: [PreviewFile] {
+    let urls = allContentData([.fileURL])
+      .compactMap { URL(dataRepresentation: $0, relativeTo: nil, isAbsolute: true) }
+    if let data = previewImageFiles,
+       let files = try? JSONDecoder().decode([PreviewFile].self, from: data),
+       files.map({ $0.url.absoluteString }).sorted() == urls.map(\.absoluteString).sorted() {
+      return files
+    }
+    return urls.map { PreviewFile(url: $0, bookmark: urls.count == 1 ? previewImageBookmark : nil) }
+  }
+
+  private func rememberFileOrder() {
+    storePreviewFiles(previewFileEntries)
+  }
+
+  private func storePreviewFiles(_ files: [PreviewFile]) {
+    guard !files.isEmpty else { return }
+    if let data = try? JSONEncoder().encode(files), data != previewImageFiles {
+      previewImageFiles = data
+    }
+    if files.count == 1, let bookmark = files.first?.bookmark { previewImageBookmark = bookmark }
+  }
+
+  private static func isLocalImageURL(_ url: URL) -> Bool {
+    url.isFileURL && (url.host == nil || url.host == "" || url.host == "localhost") &&
+      UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
   }
 
   var image: NSImage? {

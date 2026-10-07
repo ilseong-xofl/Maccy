@@ -1,6 +1,7 @@
 import XCTest
 import Defaults
 import KeyboardShortcuts
+import SwiftData
 import SwiftUI
 import Sauce
 @testable import Maccy
@@ -492,14 +493,191 @@ class ClipboardImagePreviewTests: XCTestCase {
     XCTAssertTrue(item.listText.contains(url.lastPathComponent))
   }
 
-  func testMultipleFilesKeepCompleteFileList() async throws {
-    let first = try imageFile()
-    let second = try imageFile()
+  func testMultipleImageFilesShowGalleryWithoutChangingClipboardPayload() async throws {
+    let first = try imageFile(data: imageData(width: 800, height: 400))
+    let second = try imageFile(data: imageData(width: 300, height: 600))
     let item = decorator([(.fileURL, first.dataRepresentation), (.fileURL, second.dataRepresentation)])
     await item.sizeImages()
-    XCTAssertNil(item.thumbnailImage)
+
+    XCTAssertEqual(item.previewImageCount, 2)
+    XCTAssertEqual(item.thumbnailImages.map(\.size), [NSSize(width: 800, height: 400), NSSize(width: 300, height: 600)])
+    XCTAssertEqual(item.item.fileURLs, [first, second])
+    XCTAssertEqual(item.item.contents.count, 2)
+    XCTAssertTrue(item.item.contents.allSatisfy { $0.type == NSPasteboard.PasteboardType.fileURL.rawValue })
+    XCTAssertEqual(Set(item.item.contents.compactMap(\.value)), Set([first.dataRepresentation, second.dataRepresentation]))
     XCTAssertTrue(item.listText.contains(first.lastPathComponent))
     XCTAssertTrue(item.listText.contains(second.lastPathComponent))
+    let secondPage = await item.asyncGetPreviewPage(at: 1)
+    XCTAssertEqual(secondPage?.pixelSize, NSSize(width: 300, height: 600))
+  }
+
+  func testThreeOrMoreFilesOnlyDecodeThreeStackImagesButAllPagesRemainAccessible() async throws {
+    for count in [3, 4, 5] {
+      var urls: [URL] = []
+      var sizes: [NSSize] = []
+      for index in 0..<count {
+        let size = NSSize(width: 100 + index * 40, height: 80 + index * 20)
+        sizes.append(size)
+        urls.append(try imageFile(data: imageData(width: Int(size.width), height: Int(size.height))))
+      }
+      let item = decorator(urls.map { (.fileURL, $0.dataRepresentation) })
+      await item.sizeImages()
+
+      XCTAssertEqual(item.previewImageCount, count)
+      XCTAssertEqual(item.thumbnailImages.map(\.size), Array(sizes.prefix(3)))
+      let lastPage = await item.asyncGetPreviewPage(at: count - 1)
+      XCTAssertEqual(lastPage?.pixelSize, sizes.last)
+      XCTAssertEqual(item.thumbnailImages.count, 3, "Opening a later page must not add cards to the list stack")
+    }
+  }
+
+  func testAlternativePNGAndTIFFRepresentationsAreOneImageNotTwoPages() async throws {
+    let png = try imageData(width: 120, height: 80)
+    let tiff = try imageData(width: 120, height: 80, format: .tiff)
+    let item = decorator([(.png, png), (.tiff, tiff)])
+    await item.sizeImages()
+
+    XCTAssertEqual(item.previewImageCount, 1)
+    XCTAssertEqual(item.thumbnailImages.count, 1)
+    let firstPage = await item.asyncGetPreviewPage(at: 0)
+    let secondPage = await item.asyncGetPreviewPage(at: 1)
+    XCTAssertEqual(firstPage?.pixelSize, NSSize(width: 120, height: 80))
+    XCTAssertNil(secondPage)
+  }
+
+  func testMixedImageAndNonImageFilesKeepCompleteFileListEvenWithImageRepresentation() async throws {
+    let imageURL = try imageFile()
+    let documentURL = try imageFile(extension: "txt", data: Data("Document fixture".utf8))
+    for includeImageRepresentation in [false, true] {
+      var values: [(NSPasteboard.PasteboardType, Data?)] = [
+        (.fileURL, imageURL.dataRepresentation), (.fileURL, documentURL.dataRepresentation)
+      ]
+      if includeImageRepresentation { values.append((.png, try imageData())) }
+      let item = decorator(values)
+      await item.sizeImages()
+
+      XCTAssertEqual(item.previewImageCount, 0)
+      XCTAssertTrue(item.thumbnailImages.isEmpty)
+      XCTAssertNil(item.thumbnailImage)
+      XCTAssertTrue(item.listText.contains(imageURL.lastPathComponent))
+      XCTAssertTrue(item.listText.contains(documentURL.lastPathComponent))
+      XCTAssertEqual(item.item.fileURLs, [imageURL, documentURL])
+      XCTAssertEqual(item.item.contents.count, values.count)
+    }
+  }
+
+  func testMissingAndCorruptPagesDoNotRenumberFollowingImages() async throws {
+    let first = try imageFile(data: imageData(width: 100, height: 50))
+    let corrupt = try imageFile(data: Data("invalid image fixture".utf8))
+    let third = try imageFile(data: imageData(width: 300, height: 150))
+    let missing = try imageFile()
+    try FileManager.default.removeItem(at: missing)
+    let item = decorator([first, corrupt, third, missing].map { (.fileURL, $0.dataRepresentation) })
+    await item.sizeImages()
+
+    XCTAssertEqual(item.previewImageCount, 4)
+    XCTAssertEqual(item.thumbnailImages.map(\.size), [NSSize(width: 100, height: 50), NSSize(width: 300, height: 150)])
+    let corruptPage = await item.asyncGetPreviewPage(at: 1)
+    let thirdPage = await item.asyncGetPreviewPage(at: 2)
+    let missingPage = await item.asyncGetPreviewPage(at: 3)
+    XCTAssertNil(corruptPage)
+    XCTAssertEqual(thirdPage?.pixelSize, NSSize(width: 300, height: 150))
+    XCTAssertNil(missingPage)
+  }
+
+  func testPreviewPageRejectsOutOfRangeIndexes() async throws {
+    let urls = [try imageFile(), try imageFile()]
+    let item = decorator(urls.map { (.fileURL, $0.dataRepresentation) })
+    for index in [-1, 2, 100] {
+      let page = await item.asyncGetPreviewPage(at: index)
+      XCTAssertNil(page)
+    }
+    let validPage = await item.asyncGetPreviewPage(at: 0)
+    XCTAssertNotNil(validPage)
+  }
+
+  func testEachPreviewPageReportsItsOwnOriginalDimensionsAndFileSize() async throws {
+    let sources = [try imageData(width: 4096, height: 1024), try imageData(width: 240, height: 360)]
+    let urls = try sources.map { try imageFile(data: $0) }
+    let item = decorator(urls.map { (.fileURL, $0.dataRepresentation) })
+    await item.sizeImages()
+
+    let firstPage = await item.asyncGetPreviewPage(at: 0)
+    let secondPage = await item.asyncGetPreviewPage(at: 1)
+    XCTAssertEqual(firstPage?.pixelSize, NSSize(width: 4096, height: 1024))
+    XCTAssertEqual(firstPage?.image.size, NSSize(width: 2048, height: 512))
+    XCTAssertEqual(firstPage?.sourceByteCount, Int64(sources[0].count))
+    XCTAssertEqual(secondPage?.pixelSize, NSSize(width: 240, height: 360))
+    XCTAssertEqual(secondPage?.sourceByteCount, Int64(sources[1].count))
+    XCTAssertEqual(item.imagePixelSize, NSSize(width: 4096, height: 1024))
+    XCTAssertEqual(item.clippingByteCount, Int64(sources[0].count))
+  }
+
+  func testCleanupInvalidatesLaterPageCacheAndCanRegenerateStack() async throws {
+    let urls = [try imageFile(), try imageFile(), try imageFile(), try imageFile()]
+    let item = decorator(urls.map { (.fileURL, $0.dataRepresentation) })
+    await item.sizeImages()
+    let fourthPage = await item.asyncGetPreviewPage(at: 3)
+    XCTAssertNotNil(fourthPage)
+    try FileManager.default.removeItem(at: urls[3])
+
+    item.cleanupImages()
+
+    XCTAssertTrue(item.thumbnailImages.isEmpty)
+    XCTAssertNil(item.thumbnailImage)
+    XCTAssertNil(item.previewImage)
+    XCTAssertNil(item.thumbnailImageGenerationTask)
+    let removedPage = await item.asyncGetPreviewPage(at: 3)
+    XCTAssertNil(removedPage, "Cleanup must invalidate cached pages beyond the three stack thumbnails")
+    await item.sizeImages()
+    XCTAssertEqual(item.thumbnailImages.count, 3)
+    XCTAssertEqual(item.previewImageCount, 4)
+  }
+
+  func testCancelledGalleryLoadCanRestartWithoutStaleStackImages() async throws {
+    let urls = [try imageFile(), try imageFile(), try imageFile()]
+    let item = decorator(urls.map { (.fileURL, $0.dataRepresentation) })
+    item.ensureThumbnailImage()
+    item.cleanupImages()
+    await item.sizeImages()
+
+    XCTAssertEqual(item.previewImageCount, 3)
+    XCTAssertEqual(item.thumbnailImages.count, 3)
+    XCTAssertNil(item.thumbnailImageGenerationTask)
+  }
+
+  func testBookmarkedGalleryKeepsOrderAcrossModelContextReload() async throws {
+    let first = try imageFile(data: imageData(width: 100, height: 60))
+    let second = try imageFile(data: imageData(width: 240, height: 160))
+    let urls = [first, second]
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let writer = ModelContext(container)
+    let source = HistoryItem(contents: urls.map {
+      HistoryItemContent(type: NSPasteboard.PasteboardType.fileURL.rawValue, value: $0.dataRepresentation)
+    })
+    writer.insert(source)
+    source.rememberPreviewImageAccess(from: urls)
+    // SwiftData relationships are unordered. The gallery must retain the order captured at copy time.
+    source.contents.reverse()
+    try writer.save()
+
+    let reader = ModelContext(container)
+    let restored = try XCTUnwrap(reader.model(for: source.persistentModelID) as? HistoryItem)
+    let item = HistoryItemDecorator(restored)
+    await item.sizeImages()
+
+    XCTAssertEqual(item.item.fileURLs, urls)
+    XCTAssertEqual(item.thumbnailImages.map(\.size), [NSSize(width: 100, height: 60), NSSize(width: 240, height: 160)])
+    XCTAssertEqual(Set(item.item.contents.compactMap(\.value)), Set(urls.map(\.dataRepresentation)))
+    XCTAssertEqual(item.item.previewImagePages.count, 2)
+    for page in item.item.previewImagePages {
+      guard case let .file(_, bookmark) = try XCTUnwrap(page.first) else {
+        XCTFail("A copied file must retain its file source and read-only access bookmark")
+        continue
+      }
+      XCTAssertNotNil(bookmark)
+    }
   }
 
   func testTextPathAndRemoteURLRemainText() async throws {
@@ -813,6 +991,57 @@ class ImageRowLayoutTests: XCTestCase {
 }
 
 @MainActor
+class ListItemImageStackLayoutTests: XCTestCase {
+  func testFourImagesProduceOnlyThreeVisibleCards() {
+    let layout = ListItemImageStackLayout.arrangement(
+      sourceSizes: Array(repeating: CGSize(width: 800, height: 450), count: 4),
+      availableWidth: 500, maximumHeight: 300)
+
+    XCTAssertEqual(layout.cards.count, 3)
+    XCTAssertGreaterThan(layout.size.width, 0)
+    XCTAssertGreaterThan(layout.size.height, 0)
+  }
+
+  func testRotatedCardsStayInsideStackForPortraitLandscapeAndNarrowRows() {
+    let sources = [CGSize(width: 1200, height: 800), CGSize(width: 600, height: 1400),
+                   CGSize(width: 1600, height: 400)]
+    for sizes in [sources, Array(sources.reversed())] {
+      for width: CGFloat in [140, 400, 900] {
+        let layout = ListItemImageStackLayout.arrangement(
+          sourceSizes: sizes, availableWidth: width, maximumHeight: 300)
+        XCTAssertLessThanOrEqual(layout.size.width, width + 0.01)
+        XCTAssertLessThanOrEqual(layout.size.height, 300.01)
+        for (index, card) in layout.cards.enumerated() {
+          let rotation = CGAffineTransform(rotationAngle: ListItemImageStackLayout.angle(at: index) * .pi / 180)
+          for x in [-card.size.width / 2, card.size.width / 2] {
+            for y in [-card.size.height / 2, card.size.height / 2] {
+              let rotated = CGPoint(x: x, y: y).applying(rotation)
+              let point = CGPoint(x: card.center.x + rotated.x, y: card.center.y + rotated.y)
+              XCTAssertGreaterThanOrEqual(point.x, -0.01)
+              XCTAssertGreaterThanOrEqual(point.y, -0.01)
+              XCTAssertLessThanOrEqual(point.x, layout.size.width + 0.01)
+              XCTAssertLessThanOrEqual(point.y, layout.size.height + 0.01)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  func testTwoImagesUseTwoDifferentCardAnglesAndPreserveAspectRatios() {
+    let sources = [CGSize(width: 900, height: 600), CGSize(width: 400, height: 900)]
+    let layout = ListItemImageStackLayout.arrangement(
+      sourceSizes: sources, availableWidth: 400, maximumHeight: 250)
+
+    XCTAssertEqual(layout.cards.count, 2)
+    XCTAssertNotEqual(ListItemImageStackLayout.angle(at: 0), ListItemImageStackLayout.angle(at: 1))
+    for (card, source) in zip(layout.cards, sources) {
+      XCTAssertEqual(card.size.width / card.size.height, source.width / source.height, accuracy: 0.001)
+    }
+  }
+}
+
+@MainActor
 class DetachedPreviewPlacementTests: XCTestCase {
   private let desktop = NSRect(x: 0, y: 0, width: 1_920, height: 1_080)
   private let requestedSize = NSSize(width: 520, height: 600)
@@ -1032,6 +1261,73 @@ class DetachedPreviewAutomaticSizingTests: XCTestCase {
 
 @MainActor
 class DetachedPreviewSessionSizingTests: XCTestCase {
+  func testCarouselNavigatesInOrderAndStopsAtBothEndsWithoutChangingClipboardSelection() throws {
+    let item = galleryDecorator(pageCount: 4)
+    try withPreviewSession(initialItem: item) { controller, _ in
+      XCTAssertFalse(controller.navigateImages(by: 1))
+      controller.togglePreview()
+
+      XCTAssertEqual(controller.selectedImageIndex, 0)
+      XCTAssertTrue(controller.navigateImages(by: -1))
+      XCTAssertEqual(controller.selectedImageIndex, 0)
+      for index in 1...3 {
+        XCTAssertTrue(controller.navigateImages(by: 1))
+        XCTAssertEqual(controller.selectedImageIndex, index)
+      }
+      XCTAssertTrue(controller.navigateImages(by: 1))
+      XCTAssertEqual(controller.selectedImageIndex, 3)
+      XCTAssertTrue(controller.navigateImages(by: -1))
+      XCTAssertEqual(controller.selectedImageIndex, 2)
+      XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, item.id)
+    }
+  }
+
+  func testReopeningCarouselReturnsToFirstImageWithNewPresentation() throws {
+    try withPreviewSession(initialItem: galleryDecorator(pageCount: 3)) { controller, _ in
+      controller.togglePreview()
+      let firstPresentation = controller.presentationID
+      XCTAssertTrue(controller.navigateImages(by: 1))
+      XCTAssertEqual(controller.selectedImageIndex, 1)
+      controller.close(restoreListFocus: true)
+      XCTAssertFalse(controller.navigateImages(by: 1))
+
+      controller.togglePreview()
+
+      XCTAssertEqual(controller.selectedImageIndex, 0)
+      XCTAssertNotEqual(controller.presentationID, firstPresentation)
+    }
+  }
+
+  func testSelectingAnotherGalleryRestartsAtFirstImageAndSingleImageDoesNotNavigate() throws {
+    try withPreviewSession(initialItem: galleryDecorator(pageCount: 4)) { controller, _ in
+      controller.togglePreview()
+      controller.navigateImages(by: 3)
+      XCTAssertEqual(controller.selectedImageIndex, 3)
+      let second = galleryDecorator(pageCount: 2)
+      AppState.shared.navigator.selectWithoutScrolling(item: second)
+
+      controller.selectionDidChange()
+
+      XCTAssertEqual(controller.selectedImageIndex, 0)
+      XCTAssertTrue(controller.navigateImages(by: 1))
+      XCTAssertEqual(controller.selectedImageIndex, 1)
+      AppState.shared.navigator.selectWithoutScrolling(item: galleryDecorator(pageCount: 1))
+      controller.selectionDidChange()
+      XCTAssertEqual(controller.selectedImageIndex, 0)
+      XCTAssertFalse(controller.navigateImages(by: 1))
+    }
+  }
+
+  func testEditorDoesNotConsumeCarouselNavigation() throws {
+    try withPreviewSession(initialItem: galleryDecorator(pageCount: 2)) { controller, _ in
+      controller.togglePreview()
+      AppState.shared.isEditingItem = true
+
+      XCTAssertFalse(controller.navigateImages(by: 1))
+      XCTAssertEqual(controller.selectedImageIndex, 0)
+    }
+  }
+
   func testOpeningIgnoresLegacyRememberedWindowSize() throws {
     try withPreviewSession { controller, anchor in
       let legacySize = NSSize(width: 900, height: 800)
@@ -1087,7 +1383,16 @@ class DetachedPreviewSessionSizingTests: XCTestCase {
       requestedSize: DetachedPreviewController.defaultSize, direction: Defaults[.previewDirection])
   }
 
+  private func galleryDecorator(pageCount: Int) -> HistoryItemDecorator {
+    let contents = (0..<pageCount).map { index in
+      let url = FileManager.default.temporaryDirectory.appendingPathComponent("carousel-\(UUID())-\(index).png")
+      return HistoryItemContent(type: NSPasteboard.PasteboardType.fileURL.rawValue, value: url.dataRepresentation)
+    }
+    return HistoryItemDecorator(HistoryItem(contents: contents))
+  }
+
   private func withPreviewSession(
+    initialItem: HistoryItemDecorator? = nil,
     _ test: (DetachedPreviewController, NSWindow) throws -> Void
   ) throws {
     let screen = try XCTUnwrap(NSScreen.main)
@@ -1124,7 +1429,7 @@ class DetachedPreviewSessionSizingTests: XCTestCase {
     }
     let item = HistoryItem(contents: [HistoryItemContent(
       type: NSPasteboard.PasteboardType.string.rawValue, value: Data("Preview sizing fixture".utf8))])
-    appState.navigator.selectWithoutScrolling(item: HistoryItemDecorator(item))
+    appState.navigator.selectWithoutScrolling(item: initialItem ?? HistoryItemDecorator(item))
     delegate.panel.orderFront(nil)
     try test(controller, delegate.panel)
   }
@@ -1305,6 +1610,15 @@ class ExplicitSearchKeyboardTests: XCTestCase {
     XCTAssertEqual(KeyChord(.delete, [.option]), .ignored)
     XCTAssertEqual(KeyChord(.delete, [.command, .option]), .clearHistory)
     XCTAssertEqual(KeyChord(.escape, []), .close)
+  }
+
+  func testUnmodifiedHorizontalArrowsNavigatePreviewImages() {
+    XCTAssertEqual(KeyChord(.leftArrow, []), .previousPreviewImage)
+    XCTAssertEqual(KeyChord(.rightArrow, []), .nextPreviewImage)
+    for modifiers: NSEvent.ModifierFlags in [[.command], [.option], [.shift], [.control]] {
+      XCTAssertNotEqual(KeyChord(.leftArrow, modifiers), .previousPreviewImage)
+      XCTAssertNotEqual(KeyChord(.rightArrow, modifiers), .nextPreviewImage)
+    }
   }
 
   func testDeleteShortcutDefaultsToBackspace() {

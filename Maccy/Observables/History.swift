@@ -166,11 +166,10 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     if let existingHistoryItem = findSimilarItem(item) {
       if isModified(item) == nil {
         transferContents(from: existingHistoryItem, to: item)
+      } else {
+        item.inheritPreviewImageAccess(from: existingHistoryItem)
       }
       item.firstCopiedAt = existingHistoryItem.firstCopiedAt
-      if item.previewImageBookmark == nil {
-        item.previewImageBookmark = existingHistoryItem.previewImageBookmark
-      }
       item.numberOfCopies += existingHistoryItem.numberOfCopies
       item.pin = existingHistoryItem.pin
       item.title = existingHistoryItem.title
@@ -325,6 +324,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   private func transferContents(from existingItem: HistoryItem, to newItem: HistoryItem) {
     deleteContents(of: newItem)
     newItem.contents = existingItem.contents
+    newItem.inheritPreviewImageAccess(from: existingItem)
     existingItem.contents = []
   }
 

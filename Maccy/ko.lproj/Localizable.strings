@@ -28,5 +28,6 @@
 "history_item_pinned_accessibility_value" = "고정됨";
 "history_item_selected_accessibility_value" = "선택됨, %d/%d";
 "history_item_image_accessibility_label_no_app" = "이미지, %d×%d";
+"history_item_image_count_accessibility_label" = "%ld개 이미지";
 "history_item_image_accessibility_generic" = "이미지";
 "toolbar_remove_paste_stack_action" = "붙여넣기 스택 중지";
