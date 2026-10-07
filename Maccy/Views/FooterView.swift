@@ -72,6 +72,7 @@ struct FooterView: View {
           Image(systemName: symbol).foregroundStyle(tint)
         }
       }
+        .labelStyle(FilterBadgeLabelStyle())
         .font(.system(size: 11, weight: .medium))
         .padding(.horizontal, 9)
         .frame(height: 22)
@@ -84,6 +85,15 @@ struct FooterView: View {
     .excludeFromWindowMovableByBackground()
     .accessibilityAddTraits(isSelected ? .isSelected : [])
     .accessibilityIdentifier(filter == .favorites ? "filter-favorites" : "filter-history")
+  }
+}
+
+private struct FilterBadgeLabelStyle: LabelStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    HStack(spacing: 4) {
+      configuration.icon
+      configuration.title
+    }
   }
 }
 
