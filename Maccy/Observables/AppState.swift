@@ -15,7 +15,16 @@ class AppState: Sendable {
   var history: History
   var footer: Footer
   var navigator: NavigationManager
-  var preview: SlideoutController
+  var preview: DetachedPreviewController
+  var isSearchFocused = false
+  private(set) var keyboardFocusRequestID = UUID()
+  private(set) var requestedKeyboardFocus = ClipboardKeyboardFocus.list
+
+  func requestKeyboardFocus(_ focus: ClipboardKeyboardFocus) {
+    requestedKeyboardFocus = focus
+    isSearchFocused = focus == .search
+    keyboardFocusRequestID = UUID()
+  }
 
   var isEditingItem: Bool = false
   var suppressPopupAutoClose: Bool {
@@ -23,6 +32,7 @@ class AppState: Sendable {
   }
 
   var searchVisible: Bool {
+    if isSearchFocused { return true }
     if !Defaults[.showSearch] { return false }
     switch Defaults[.searchVisibility] {
     case .always: return true
@@ -45,15 +55,7 @@ class AppState: Sendable {
     self.footer = footer
     popup = Popup()
     navigator = NavigationManager(history: history, footer: footer)
-    preview = SlideoutController(
-      onContentResize: { contentWidth in
-        Defaults[.windowSize].width = contentWidth
-      },
-      onSlideoutResize: { previewWidth in
-        Defaults[.previewWidth] = previewWidth
-      })
-    preview.contentWidth = Defaults[.windowSize].width
-    preview.slideoutWidth = Defaults[.previewWidth]
+    preview = DetachedPreviewController()
   }
 
   @MainActor

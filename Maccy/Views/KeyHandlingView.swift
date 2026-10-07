@@ -4,7 +4,7 @@ import SwiftUI
 
 struct KeyHandlingView<Content: View>: View {
   @Binding var searchQuery: String
-  @FocusState.Binding var searchFocused: Bool
+  @FocusState.Binding var keyboardFocus: ClipboardKeyboardFocus?
   @ViewBuilder let content: () -> Content
 
   @Environment(AppState.self) private var appState
@@ -19,7 +19,7 @@ struct KeyHandlingView<Content: View>: View {
         // so pressing ⌘, on non-English layout doesn't open
         // preferences. Stick to NSEvent to fix this behavior.
 
-        if searchFocused {
+        if keyboardFocus == .search {
           // Ignore input when candidate window is open
           // https://stackoverflow.com/questions/73677444/how-to-detect-the-candidate-window-when-using-japanese-keyboard
           if let inputClient = NSApp.keyWindow?.firstResponder as? NSTextInputClient,
@@ -56,6 +56,7 @@ struct KeyHandlingView<Content: View>: View {
             return .ignored
           }
         case .clearSearch:
+          guard keyboardFocus == .search else { return .handled }
           searchQuery = ""
           return .handled
         case .deleteCurrentItem:
@@ -66,24 +67,15 @@ struct KeyHandlingView<Content: View>: View {
           }
           return .handled
         case .deleteOneCharFromSearch:
-          searchFocused = true
-          _ = searchQuery.popLast()
-          return .handled
+          return keyboardFocus == .search ? .ignored : .handled
         case .deleteLastWordFromSearch:
-          searchFocused = true
-          let newQuery = searchQuery.split(separator: " ").dropLast().joined(separator: " ")
-          if newQuery.isEmpty {
-            searchQuery = ""
-          } else {
-            searchQuery = "\(newQuery) "
-          }
-
-          return .handled
+          return keyboardFocus == .search ? .ignored : .handled
         case .moveToNext:
           guard NSApp.characterPickerWindow == nil else {
             return .ignored
           }
 
+          keyboardFocus = .list
           appState.navigator.highlightNext()
           return .handled
         case .moveToLast:
@@ -91,6 +83,7 @@ struct KeyHandlingView<Content: View>: View {
             return .ignored
           }
 
+          keyboardFocus = .list
           appState.navigator.highlightLast()
           return .handled
         case .moveToPrevious:
@@ -98,6 +91,7 @@ struct KeyHandlingView<Content: View>: View {
             return .ignored
           }
 
+          keyboardFocus = .list
           appState.navigator.highlightPrevious()
           return .handled
         case .moveToFirst:
@@ -105,6 +99,7 @@ struct KeyHandlingView<Content: View>: View {
             return .ignored
           }
 
+          keyboardFocus = .list
           appState.navigator.highlightFirst()
           return .handled
         case .extendToNext:
@@ -153,7 +148,20 @@ struct KeyHandlingView<Content: View>: View {
           appState.select(flags: .currentModifierFlags)
           return .handled
         case .close:
-          appState.popup.close()
+          if appState.preview.isVisible {
+            appState.preview.close(restoreListFocus: true)
+          } else if keyboardFocus == .search {
+            keyboardFocus = .list
+          } else {
+            appState.popup.close()
+          }
+          return .handled
+        case .focusSearch:
+          appState.requestKeyboardFocus(.search)
+          return .handled
+        case .spacePreview:
+          guard keyboardFocus != .search else { return .ignored }
+          appState.preview.togglePreview()
           return .handled
         case .togglePreview:
           appState.preview.togglePreview()
@@ -171,6 +179,9 @@ struct KeyHandlingView<Content: View>: View {
           return .handled
         }
 
+        // Plain typing belongs only to explicitly focused search. The list never
+        // redirects characters (including Backspace) into the search field.
+        if keyboardFocus != .search, case .unknown = KeyChord(NSApp.currentEvent) { return .handled }
         return .ignored
       }
   }

@@ -9,8 +9,7 @@ struct AppearanceSettingsPane: View {
   @Default(.pinTo) private var pinTo
   @Default(.textPreviewLines) private var textPreviewLines
   @Default(.imageMaxHeight) private var imageHeight
-  @Default(.openPreviewAutomatically) private var openPreviewAutomatically
-  @Default(.previewDelay) private var previewDelay
+  @Default(.previewDirection) private var previewDirection
   @Default(.highlightMatch) private var highlightMatch
   @Default(.menuIcon) private var menuIcon
   @Default(.showInStatusBar) private var showInStatusBar
@@ -52,13 +51,6 @@ struct AppearanceSettingsPane: View {
     return formatter
   }()
 
-  private let previewDelayFormatter: NumberFormatter = {
-    let formatter = NumberFormatter()
-    formatter.minimum = 200
-    formatter.maximum = 100_000
-    return formatter
-  }()
-
   private var textPreviewLinesLabel: Text {
     Text(String(
       localized: "TextPreviewLines",
@@ -74,6 +66,26 @@ struct AppearanceSettingsPane: View {
       Maximum visible lines per text item after wrapping to the window width. \
       Short items use only the space they need.
       Range: 1–20. Default: 5.
+      """,
+      table: "AppearanceSettings"
+    ))
+  }
+
+  private var previewDirectionLabel: Text {
+    Text(String(
+      localized: "PreviewDirection",
+      defaultValue: "Preview window side:",
+      table: "AppearanceSettings"
+    ))
+  }
+
+  private var previewDirectionHelp: Text {
+    Text(String(
+      localized: "PreviewDirectionTooltip",
+      defaultValue: """
+      Open the preview on this side of the clipboard window. \
+      Use the opposite side when there is not enough space.
+      Default: Right.
       """,
       table: "AppearanceSettings"
     ))
@@ -147,23 +159,17 @@ struct AppearanceSettingsPane: View {
         }
       }
 
-      Settings.Section(title: "") {
-        Defaults.Toggle(key: .openPreviewAutomatically) {
-          Text("OpenPreviewAutomatically", tableName: "AppearanceSettings")
+      Settings.Section(label: { previewDirectionLabel }) {
+        Picker("", selection: $previewDirection) {
+          Text(String(localized: "PreviewDirectionRight", defaultValue: "Right", table: "AppearanceSettings"))
+            .tag(PreviewDirection.right)
+          Text(String(localized: "PreviewDirectionLeft", defaultValue: "Left", table: "AppearanceSettings"))
+            .tag(PreviewDirection.left)
         }
-      }
-
-      Settings.Section(label: { Text("PreviewDelay", tableName: "AppearanceSettings") }) {
-        HStack {
-          TextField("", value: $previewDelay, formatter: previewDelayFormatter)
-            .frame(width: 120)
-            .help(Text("PreviewDelayTooltip", tableName: "AppearanceSettings"))
-            .accessibilityLabel(Text("PreviewDelay", tableName: "AppearanceSettings"))
-          Stepper("", value: $previewDelay, in: 200...100_000)
-            .labelsHidden()
-            .accessibilityLabel(Text("PreviewDelay", tableName: "AppearanceSettings"))
-        }
-        .disabled(!openPreviewAutomatically)
+        .labelsHidden()
+        .frame(width: 141, alignment: .leading)
+        .help(previewDirectionHelp)
+        .accessibilityLabel(previewDirectionLabel)
       }
 
       Settings.Section(

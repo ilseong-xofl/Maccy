@@ -5,6 +5,10 @@ import Sauce
 struct KeyShortcut: Identifiable {
   static func create(character: String) -> [KeyShortcut] {
     let key = Key(character: character, virtualKeyCode: nil)
+    // Keep existing f pins usable without advertising the now-reserved ⌘F search shortcut.
+    if character.lowercased() == "f" {
+      return [KeyShortcut(key: key, modifierFlags: [.option])]
+    }
     return [
       KeyShortcut(key: key),
       KeyShortcut(key: key, modifierFlags: [.option]),

@@ -16,10 +16,5 @@ struct FooterItemView: View {
         Text(LocalizedStringKey(item.title))
       }
     }
-    .onHover { hovering in
-      if hovering && appState.preview.state.isOpen {
-        appState.preview.togglePreview()
-      }
-    }
   }
 }

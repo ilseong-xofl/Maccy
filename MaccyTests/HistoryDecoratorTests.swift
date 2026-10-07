@@ -1,6 +1,7 @@
 import XCTest
 import Defaults
 import SwiftUI
+import Sauce
 @testable import Maccy
 
 @MainActor
@@ -584,7 +585,7 @@ class FloatingPanelSizingTests: XCTestCase {
       let panel = makePanel()
       let accepted = panel.windowWillResize(panel, to: NSSize(width: 80, height: 500))
 
-      XCTAssertEqual(accepted.width, AppState.shared.preview.minimumContentWidth, accuracy: 1)
+      XCTAssertEqual(accepted.width, FloatingPanel<AnyView>.minimumListWidth, accuracy: 1)
     }
   }
 
@@ -600,23 +601,14 @@ class FloatingPanelSizingTests: XCTestCase {
     }
   }
 
-  func testCompletedResizeSavesFinalListSizeWithoutSidecarWidth() {
+  func testCompletedResizeSavesOnlyListWindowSize() {
     withRestoredWindowState {
-      let panel = makePanel(size: NSSize(width: 820, height: 500))
-      let preview = AppState.shared.preview
-      preview.state = .open
-      preview.contentWidth = 640
-      preview.slideoutWidth = 400
-      preview.contentResizeWidth = 420
-      preview.slideoutResizeWidth = 400
-      preview.resizingMode = .content
-
+      let panel = makePanel(size: NSSize(width: 420, height: 500))
+      let previewSize = Defaults[.previewWindowSize]
       panel.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: panel))
-
-      XCTAssertEqual(preview.contentWidth, 420, accuracy: 1)
       XCTAssertEqual(Defaults[.windowSize].width, 420, accuracy: 1)
       XCTAssertEqual(Defaults[.windowSize].height, panel.frame.height, accuracy: 1)
-      XCTAssertEqual(preview.slideoutWidth, 400, accuracy: 1)
+      XCTAssertEqual(Defaults[.previewWindowSize], previewSize)
     }
   }
 
@@ -627,48 +619,28 @@ class FloatingPanelSizingTests: XCTestCase {
   }
 
   private func withRestoredWindowState(_ test: () -> Void) {
-    let preview = AppState.shared.preview
     let popup = AppState.shared.popup
     let savedSize = Defaults[.windowSize]
     let savedPosition = Defaults[.windowPosition]
-    let savedPreviewWidth = Defaults[.previewWidth]
-    let savedAutoOpen = Defaults[.openPreviewAutomatically]
-    let savedState = preview.state
-    let savedMode = preview.resizingMode
-    let savedContentWidth = preview.contentWidth
-    let savedSlideoutWidth = preview.slideoutWidth
-    let savedContentResizeWidth = preview.contentResizeWidth
-    let savedSlideoutResizeWidth = preview.slideoutResizeWidth
     let savedHeaderHeight = popup.headerHeight
     let savedFooterHeight = popup.footerHeight
     let savedExtraTopHeight = popup.extraTopHeight
     let savedExtraBottomHeight = popup.extraBottomHeight
     defer {
-      preview.state = savedState
-      preview.resizingMode = savedMode
-      preview.contentWidth = savedContentWidth
-      preview.slideoutWidth = savedSlideoutWidth
-      preview.contentResizeWidth = savedContentResizeWidth
-      preview.slideoutResizeWidth = savedSlideoutResizeWidth
       popup.headerHeight = savedHeaderHeight
       popup.footerHeight = savedFooterHeight
       popup.extraTopHeight = savedExtraTopHeight
       popup.extraBottomHeight = savedExtraBottomHeight
       Defaults[.windowSize] = savedSize
       Defaults[.windowPosition] = savedPosition
-      Defaults[.previewWidth] = savedPreviewWidth
-      Defaults[.openPreviewAutomatically] = savedAutoOpen
     }
-
-    Defaults[.openPreviewAutomatically] = false
-    preview.state = .closed
-    preview.resizingMode = .none
     popup.headerHeight = 0
     popup.footerHeight = 0
     popup.extraTopHeight = 0
     popup.extraBottomHeight = 0
     test()
   }
+
 }
 
 @MainActor
@@ -764,5 +736,163 @@ class ImageRowLayoutTests: XCTestCase {
     )
     view.layoutSubtreeIfNeeded()
     return view.fittingSize
+  }
+}
+
+@MainActor
+class DetachedPreviewPlacementTests: XCTestCase {
+  private let desktop = NSRect(x: 0, y: 0, width: 1_920, height: 1_080)
+  private let requestedSize = NSSize(width: 520, height: 600)
+
+  func testRightPlacementLeavesGapAndAlignsTopEdges() {
+    let anchor = NSRect(x: 400, y: 300, width: 400, height: 600)
+    let frame = DetachedPreviewController.placement(anchorFrame: anchor, visibleFrame: desktop,
+                                                    requestedSize: requestedSize, direction: .right)
+    XCTAssertEqual(frame, NSRect(x: 808, y: 300, width: 520, height: 600))
+  }
+
+  func testLeftPreferenceIsHonoredWhenBothSidesFit() {
+    let anchor = NSRect(x: 700, y: 300, width: 400, height: 600)
+    let frame = DetachedPreviewController.placement(anchorFrame: anchor, visibleFrame: desktop,
+                                                    requestedSize: requestedSize, direction: .left)
+    XCTAssertEqual(frame, NSRect(x: 172, y: 300, width: 520, height: 600))
+  }
+
+  func testRightEdgeFallsBackToLeftWithoutShrinking() {
+    let anchor = NSRect(x: 1_400, y: 300, width: 400, height: 600)
+    let frame = DetachedPreviewController.placement(anchorFrame: anchor, visibleFrame: desktop,
+                                                    requestedSize: requestedSize, direction: .right)
+    XCTAssertEqual(frame.maxX, anchor.minX - 8)
+    XCTAssertEqual(frame.size, requestedSize)
+  }
+
+  func testLeftEdgeFallsBackToRightWithoutShrinking() {
+    let anchor = NSRect(x: 40, y: 300, width: 400, height: 600)
+    let frame = DetachedPreviewController.placement(anchorFrame: anchor, visibleFrame: desktop,
+                                                    requestedSize: requestedSize, direction: .left)
+    XCTAssertEqual(frame.minX, anchor.maxX + 8)
+    XCTAssertEqual(frame.size, requestedSize)
+  }
+
+  func testNeitherSideFitsChoosesMoreRoomAndReducesWidth() {
+    let screen = NSRect(x: 0, y: 0, width: 1_400, height: 900)
+    let anchor = NSRect(x: 350, y: 100, width: 400, height: 700)
+    let frame = DetachedPreviewController.placement(anchorFrame: anchor, visibleFrame: screen,
+                                                    requestedSize: NSSize(width: 800, height: 600), direction: .left)
+    XCTAssertEqual(frame.minX, 758)
+    XCTAssertEqual(frame.width, 642)
+    XCTAssertEqual(frame.height, 600)
+    XCTAssertTrue(screen.contains(frame))
+  }
+
+  func testSecondaryScreenWithNegativeOriginKeepsPreviewOnThatScreen() {
+    let screen = NSRect(x: -1_920, y: -900, width: 1_920, height: 900)
+    let anchor = NSRect(x: -1_700, y: -700, width: 400, height: 500)
+    let frame = DetachedPreviewController.placement(anchorFrame: anchor, visibleFrame: screen,
+                                                    requestedSize: requestedSize, direction: .right)
+    XCTAssertEqual(frame.minX, -1_292)
+    XCTAssertEqual(frame.maxY, anchor.maxY)
+    XCTAssertTrue(screen.contains(frame))
+  }
+
+  func testScreenSmallerThanMinimumUsesVisibleBounds() {
+    let screen = NSRect(x: -220, y: 40, width: 220, height: 180)
+    let anchor = NSRect(x: -190, y: 70, width: 140, height: 120)
+    let frame = DetachedPreviewController.placement(anchorFrame: anchor, visibleFrame: screen,
+                                                    requestedSize: requestedSize, direction: .right)
+    XCTAssertEqual(frame, screen)
+  }
+
+  func testVerticalPlacementClampsToVisibleFrameAboveAndBelow() {
+    let screen = NSRect(x: 0, y: 40, width: 1_600, height: 900)
+    let below = DetachedPreviewController.placement(
+      anchorFrame: NSRect(x: 100, y: -100, width: 300, height: 100), visibleFrame: screen,
+      requestedSize: requestedSize, direction: .right)
+    let above = DetachedPreviewController.placement(
+      anchorFrame: NSRect(x: 100, y: 850, width: 300, height: 200), visibleFrame: screen,
+      requestedSize: requestedSize, direction: .right)
+    XCTAssertEqual(below.minY, screen.minY)
+    XCTAssertEqual(above.maxY, screen.maxY)
+    XCTAssertTrue(screen.contains(below))
+    XCTAssertTrue(screen.contains(above))
+  }
+
+  func testTemporaryConstraintPreservesRequestedSizeForLargerScreen() {
+    let savedSize = Defaults[.previewWindowSize]
+    defer { Defaults[.previewWindowSize] = savedSize }
+    let requested = NSSize(width: 800, height: 700)
+    Defaults[.previewWindowSize] = requested
+    let anchor = NSRect(x: 300, y: 100, width: 400, height: 700)
+    let constrained = DetachedPreviewController.placement(
+      anchorFrame: anchor, visibleFrame: NSRect(x: 0, y: 0, width: 1_100, height: 900),
+      requestedSize: Defaults[.previewWindowSize], direction: .right)
+    let unconstrained = DetachedPreviewController.placement(
+      anchorFrame: anchor, visibleFrame: NSRect(x: 0, y: 0, width: 2_400, height: 1_200),
+      requestedSize: Defaults[.previewWindowSize], direction: .right)
+    XCTAssertLessThan(constrained.width, requested.width)
+    XCTAssertEqual(Defaults[.previewWindowSize], requested)
+    XCTAssertEqual(unconstrained.size, requested)
+  }
+}
+
+@MainActor
+class ExplicitSearchKeyboardTests: XCTestCase {
+  func testRepeatedExplicitFocusRequestsAreDelivered() {
+    let appState = AppState.shared
+    let savedFocus = appState.requestedKeyboardFocus
+    let savedSearchFocused = appState.isSearchFocused
+    defer {
+      appState.requestKeyboardFocus(savedFocus)
+      appState.isSearchFocused = savedSearchFocused
+    }
+    appState.requestKeyboardFocus(.search)
+    let firstRequest = appState.keyboardFocusRequestID
+    appState.requestKeyboardFocus(.search)
+    XCTAssertNotEqual(appState.keyboardFocusRequestID, firstRequest)
+    XCTAssertEqual(appState.requestedKeyboardFocus, .search)
+    XCTAssertTrue(appState.isSearchFocused)
+    appState.requestKeyboardFocus(.list)
+    XCTAssertEqual(appState.requestedKeyboardFocus, .list)
+    XCTAssertFalse(appState.isSearchFocused)
+  }
+
+  func testSpacePreviewsAndCommandFFocusesSearch() {
+    XCTAssertEqual(KeyChord(.space, []), .spacePreview)
+    XCTAssertEqual(KeyChord(.f, [.command]), .focusSearch)
+    XCTAssertEqual(KeyChord(.f, []), .unknown)
+    XCTAssertEqual(KeyChord(.delete, []), .unknown)
+    XCTAssertEqual(KeyChord(.escape, []), .close)
+  }
+
+  func testExistingFPinDoesNotStealCommandF() {
+    let shortcuts = KeyShortcut.create(character: "f")
+    XCTAssertFalse(shortcuts.contains { $0.modifierFlags == [.command] })
+    XCTAssertTrue(shortcuts.contains { $0.modifierFlags == [.option] })
+    XCTAssertFalse(HistoryItem.supportedPins.contains("f"))
+  }
+
+  func testExplicitFocusRevealsSearchEvenWhenHidden() {
+    let appState = AppState.shared
+    let savedShowSearch = Defaults[.showSearch]
+    let savedVisibility = Defaults[.searchVisibility]
+    let savedFocus = appState.isSearchFocused
+    let savedQuery = appState.history.searchQuery
+    defer {
+      Defaults[.showSearch] = savedShowSearch
+      Defaults[.searchVisibility] = savedVisibility
+      appState.isSearchFocused = savedFocus
+      appState.history.searchQuery = savedQuery
+    }
+    appState.history.searchQuery = ""
+    Defaults[.showSearch] = false
+    appState.isSearchFocused = false
+    XCTAssertFalse(appState.searchVisible)
+    appState.isSearchFocused = true
+    XCTAssertTrue(appState.searchVisible)
+    Defaults[.showSearch] = true
+    Defaults[.searchVisibility] = .duringSearch
+    XCTAssertTrue(appState.searchVisible)
+    appState.isSearchFocused = false
+    XCTAssertFalse(appState.searchVisible)
   }
 }

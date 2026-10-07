@@ -10,12 +10,13 @@ class HistoryItem {
   @MainActor
   static var supportedPins: Set<String> {
     // "a" reserved for select all
+    // "f" reserved for explicitly focusing search
     // "q" reserved for quit
     // "v" reserved for paste
     // "w" reserved for close window
     // "z" reserved for undo/redo
     var keys = Set([
-      "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l",
+      "b", "c", "d", "e", "g", "h", "i", "j", "k", "l",
       "m", "n", "o", "p", "r", "s", "t", "u", "x", "y"
     ])
 

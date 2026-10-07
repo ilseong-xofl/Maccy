@@ -1,0 +1,225 @@
+import AppKit
+import Defaults
+import Observation
+import SwiftUI
+
+@Observable
+final class DetachedPreviewController: NSObject, NSWindowDelegate {
+  nonisolated static let minimumSize = NSSize(width: 280, height: 240)
+  nonisolated static let windowGap: CGFloat = 8
+
+  private(set) var isVisible = false
+  @ObservationIgnored private(set) var window: NSPanel?
+  @ObservationIgnored private var directionObservation: Task<Void, Never>?
+  @ObservationIgnored private var eventMonitor: Any?
+
+  override init() {
+    super.init()
+    directionObservation = Task { [weak self] in
+      for await _ in Defaults.updates(.previewDirection, initial: false) {
+        guard let self else { return }
+        reposition()
+      }
+    }
+  }
+
+  isolated deinit {
+    directionObservation?.cancel()
+    if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+    window?.delegate = nil
+    window?.orderOut(nil)
+  }
+
+  func togglePreview() {
+    guard !AppState.shared.isEditingItem else { return }
+    if isVisible {
+      close(restoreListFocus: true)
+      return
+    }
+    guard canPreviewSelection, let anchor = listWindow, anchor.isVisible else { return }
+    if window == nil { makeWindow() }
+    isVisible = true
+    reposition()
+    window?.makeKeyAndOrderFront(nil)
+  }
+
+  func close(restoreListFocus: Bool = false) {
+    guard isVisible else { return }
+    isVisible = false
+    window?.orderOut(nil)
+    if restoreListFocus, let anchor = listWindow, anchor.isVisible {
+      AppState.shared.requestKeyboardFocus(.list)
+      anchor.makeKeyAndOrderFront(nil)
+    }
+  }
+
+  func selectionDidChange() {
+    guard isVisible else { return }
+    if !canPreviewSelection {
+      close(restoreListFocus: window?.isKeyWindow == true)
+    }
+    // SlideoutContentView observes the selected item directly.
+  }
+
+  func reposition() {
+    guard isVisible, let window, !window.inLiveResize, let anchor = listWindow,
+          let screen = anchor.screen ?? NSScreen.main else { return }
+    let visibleFrame = screen.visibleFrame
+    window.minSize = NSSize(width: min(Self.minimumSize.width, visibleFrame.width),
+                            height: min(Self.minimumSize.height, visibleFrame.height))
+    window.maxSize = visibleFrame.size
+    let frame = Self.placement(anchorFrame: anchor.frame, visibleFrame: visibleFrame,
+                               requestedSize: Defaults[.previewWindowSize], direction: Defaults[.previewDirection])
+    // Screen constraints are temporary; only a completed user resize saves a new size.
+    window.setFrame(frame, display: true)
+  }
+
+  func owns(_ candidate: NSWindow?) -> Bool {
+    guard let candidate, let window else { return false }
+    if candidate === window { return true }
+    var parent = candidate.sheetParent
+    while let current = parent {
+      if current === window { return true }
+      parent = current.sheetParent
+    }
+    return false
+  }
+
+  func windowShouldClose(_ sender: NSWindow) -> Bool {
+    guard !AppState.shared.isEditingItem, sender.attachedSheet == nil else { return false }
+    close(restoreListFocus: true)
+    return false
+  }
+
+  func windowDidEndLiveResize(_ notification: Notification) {
+    guard let resizedWindow = notification.object as? NSWindow, resizedWindow === window else { return }
+    Defaults[.previewWindowSize] = resizedWindow.frame.size
+    reposition()
+  }
+
+  func windowDidResignKey(_ notification: Notification) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self, isVisible else { return }
+      let appState = AppState.shared
+      guard !appState.suppressPopupAutoClose, NSApp.modalWindow == nil,
+            window?.attachedSheet == nil, listWindow?.attachedSheet == nil else { return }
+      if NSApp.keyWindow === listWindow || owns(NSApp.keyWindow) { return }
+      listWindow?.close()
+    }
+  }
+
+  private var listWindow: NSWindow? { AppState.shared.appDelegate?.panel }
+
+  private var canPreviewSelection: Bool {
+    let appState = AppState.shared
+    return appState.navigator.leadHistoryItem != nil
+      || (appState.navigator.pasteStackSelected && appState.history.pasteStack != nil)
+  }
+
+  private func makeWindow() {
+    let panel = DetachedPreviewPanel(contentRect: NSRect(origin: .zero, size: Defaults[.previewWindowSize]),
+                                     styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
+                                     backing: .buffered, defer: false)
+    panel.title = NSLocalizedString("ShowPreview", tableName: "GeneralSettings", comment: "")
+      .trimmingCharacters(in: CharacterSet(charactersIn: ":： "))
+    panel.identifier = NSUserInterfaceItemIdentifier("MaccyPreview.detached-preview")
+    panel.delegate = self
+    panel.isReleasedWhenClosed = false
+    panel.isFloatingPanel = true
+    panel.hidesOnDeactivate = false
+    panel.becomesKeyOnlyIfNeeded = false
+    panel.level = .statusBar
+    panel.collectionBehavior = [.auxiliary, .moveToActiveSpace, .fullScreenAuxiliary]
+    panel.animationBehavior = .none
+    let hostingView = NSHostingView(rootView: SlideoutContentView()
+      .environment(AppState.shared)
+      .textSelection(.enabled)
+      .frame(maxWidth: .infinity, maxHeight: .infinity))
+    hostingView.sizingOptions = []
+    panel.contentView = hostingView
+    window = panel
+    eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      guard let self, isVisible, owns(event.window), !AppState.shared.isEditingItem,
+            window?.attachedSheet == nil, NSApp.modalWindow == nil else { return event }
+      if let inputClient = event.window?.firstResponder as? NSTextInputClient, inputClient.hasMarkedText() {
+        return event
+      }
+      switch KeyChord(event) {
+      case .focusSearch:
+        listWindow?.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { AppState.shared.requestKeyboardFocus(.search) }
+        return nil
+      case .spacePreview, .close, .togglePreview:
+        close(restoreListFocus: true)
+        return nil
+      case .moveToNext:
+        AppState.shared.navigator.highlightNext()
+        return nil
+      case .moveToPrevious:
+        AppState.shared.navigator.highlightPrevious()
+        return nil
+      case .moveToFirst:
+        AppState.shared.navigator.highlightFirst()
+        return nil
+      case .moveToLast:
+        AppState.shared.navigator.highlightLast()
+        return nil
+      case .pinOrUnpin:
+        AppState.shared.togglePin()
+        return nil
+      case .deleteCurrentItem:
+        if AppState.shared.navigator.pasteStackSelected {
+          AppState.shared.removePasteStack()
+        } else {
+          AppState.shared.deleteSelection()
+        }
+        return nil
+      case .selectCurrentItem:
+        AppState.shared.select(flags: .currentModifierFlags)
+        return nil
+      case .openPreferences:
+        AppState.shared.openPreferences()
+        return nil
+      default:
+        return event
+      }
+    }
+  }
+
+  /// Computes an on-screen frame without changing the requested size or the list window.
+  nonisolated static func placement(anchorFrame: NSRect, visibleFrame: NSRect,
+                                     requestedSize: NSSize, direction: PreviewDirection) -> NSRect {
+    let screen = visibleFrame.standardized
+    guard screen.width > 0, screen.height > 0 else { return NSRect(origin: screen.origin, size: .zero) }
+    let desiredWidth = requestedSize.width.isFinite ? requestedSize.width : minimumSize.width
+    let desiredHeight = requestedSize.height.isFinite ? requestedSize.height : minimumSize.height
+    let width = min(max(desiredWidth, minimumSize.width), screen.width)
+    let height = min(max(desiredHeight, minimumSize.height), screen.height)
+    let leftSpace = max(0, min(anchorFrame.minX - windowGap, screen.maxX) - screen.minX)
+    let rightSpace = max(0, screen.maxX - max(anchorFrame.maxX + windowGap, screen.minX))
+    let preferredSpace = direction == .right ? rightSpace : leftSpace
+    let oppositeSpace = direction == .right ? leftSpace : rightSpace
+    let useRight: Bool
+    if preferredSpace >= width {
+      useRight = direction == .right
+    } else if oppositeSpace >= width {
+      useRight = direction != .right
+    } else if rightSpace == leftSpace {
+      useRight = direction == .right
+    } else {
+      useRight = rightSpace > leftSpace
+    }
+    let availableWidth = useRight ? rightSpace : leftSpace
+    // If neither side can hold even the minimum, overlap the list rather than leave the screen.
+    let finalWidth = min(width, max(minimumSize.width, availableWidth))
+    let proposedX = useRight ? anchorFrame.maxX + windowGap : anchorFrame.minX - windowGap - finalWidth
+    let x = min(max(proposedX, screen.minX), screen.maxX - finalWidth)
+    let y = min(max(anchorFrame.maxY - height, screen.minY), screen.maxY - height)
+    return NSRect(x: x, y: y, width: finalWidth, height: height)
+  }
+}
+
+private final class DetachedPreviewPanel: NSPanel {
+  override var canBecomeKey: Bool { true }
+  override var canBecomeMain: Bool { false }
+}

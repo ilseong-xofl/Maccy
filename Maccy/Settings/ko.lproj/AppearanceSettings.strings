@@ -18,6 +18,10 @@
 "TextPreviewLinesTooltip" = "창 너비에 맞춰 자동 줄바꿈한 뒤 각 텍스트 항목에 표시할 최대 줄 수입니다. 짧은 내용은 필요한 높이만 사용합니다.\n범위: 1–20줄. 기본값: 5줄.";
 "ImageHeight" = "최대 이미지 높이:";
 "ImageHeightTooltip" = "이미지 비율을 유지하면서 창 너비와 이 높이 안에 전체 이미지를 표시합니다. 작은 이미지는 확대하지 않습니다.\n범위: 1–600. 기본값: 300.";
+"PreviewDirection" = "미리보기 창 방향:";
+"PreviewDirectionRight" = "오른쪽";
+"PreviewDirectionLeft" = "왼쪽";
+"PreviewDirectionTooltip" = "클립보드 창의 어느 쪽에 미리보기를 열지 선택합니다. 공간이 부족하면 반대쪽에 표시합니다.\n기본값: 오른쪽.";
 "OpenPreviewAutomatically" = "미리보기를 자동으로 열기";
 "PreviewDelay" = "미리보기 지연:";
 "PreviewDelayTooltip" = "미리보기 팝업이 표시될 때까지 밀리초 단위로 지연됩니다.\n기본값: 1500.";

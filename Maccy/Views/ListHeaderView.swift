@@ -3,7 +3,7 @@ import KeyboardShortcuts
 import SwiftUI
 
 struct ListHeaderView: View {
-  @FocusState.Binding var searchFocused: Bool
+  @FocusState.Binding var keyboardFocus: ClipboardKeyboardFocus?
   @Binding var searchQuery: String
 
   @Environment(AppState.self) private var appState
@@ -20,8 +20,7 @@ struct ListHeaderView: View {
           .padding(.leading, 5)
       }
 
-      SearchFieldView(placeholder: "search_placeholder", query: $searchQuery)
-        .focused($searchFocused)
+      SearchFieldView(placeholder: "search_placeholder", query: $searchQuery, keyboardFocus: $keyboardFocus)
         .frame(maxWidth: .infinity)
         .onChange(of: scenePhase) {
           if scenePhase == .background && !searchQuery.isEmpty {

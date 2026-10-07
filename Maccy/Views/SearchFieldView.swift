@@ -3,6 +3,7 @@ import SwiftUI
 struct SearchFieldView: View {
   var placeholder: LocalizedStringKey
   @Binding var query: String
+  @FocusState.Binding var keyboardFocus: ClipboardKeyboardFocus?
 
   @Environment(AppState.self) private var appState
 
@@ -21,6 +22,7 @@ struct SearchFieldView: View {
           .accessibilityHidden(true)
 
         TextField(placeholder, text: $query)
+          .focused($keyboardFocus, equals: .search)
           .disableAutocorrection(true)
           .lineLimit(1)
           .textFieldStyle(.plain)
@@ -43,13 +45,4 @@ struct SearchFieldView: View {
       }
     }
   }
-}
-
-#Preview {
-  return List {
-    SearchFieldView(placeholder: "search_placeholder", query: .constant(""))
-    SearchFieldView(placeholder: "search_placeholder", query: .constant("search"))
-  }
-  .frame(width: 300)
-  .environment(\.locale, .init(identifier: "en"))
 }

@@ -10,6 +10,13 @@ nonisolated struct StorageType: Sendable {
   var types: [NSPasteboard.PasteboardType]
 }
 
+nonisolated enum PreviewDirection: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case left
+  case right
+
+  var id: String { rawValue }
+}
+
 nonisolated extension Defaults.Keys {
 #if DEBUG
   // UI Tests bundle preferences
@@ -59,6 +66,10 @@ nonisolated extension Defaults.Keys {
   static let popupScreen = Key<Int>("popupScreen", default: 0, suite: preferencesSuite)
   static let openPreviewAutomatically = Key<Bool>("openPreviewAutomatically", default: false, suite: preferencesSuite)
   static let previewDelay = Key<Int>("previewDelay", default: 1500, suite: preferencesSuite)
+  static let previewDirection = Key<PreviewDirection>("previewDirection", default: .right, suite: preferencesSuite)
+  static let previewWindowSize = Key<NSSize>(
+    "previewWindowSize", default: NSSize(width: 520, height: 600), suite: preferencesSuite
+  )
   static let removeFormattingByDefault = Key<Bool>("removeFormattingByDefault", default: false, suite: preferencesSuite)
   static let searchMode = Key<Search.Mode>("searchMode", default: .exact, suite: preferencesSuite)
   static let showFooter = Key<Bool>("showFooter", default: true, suite: preferencesSuite)

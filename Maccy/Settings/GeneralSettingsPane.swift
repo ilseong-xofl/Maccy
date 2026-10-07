@@ -63,9 +63,26 @@ struct GeneralSettingsPane: View {
         bottomDivider: true,
         label: { Text("ShowPreview", tableName: "GeneralSettings") }
       ) {
-        KeyboardShortcuts.Recorder(for: .togglePreview)
-          .help(Text("ShowPreviewTooltip", tableName: "GeneralSettings"))
-          .accessibilityLabel(Text("ShowPreview", tableName: "GeneralSettings"))
+        VStack(alignment: .leading, spacing: 4) {
+          Text(String(
+            localized: "PreviewSpaceShortcut",
+            defaultValue: "Space (while browsing items)",
+            table: "GeneralSettings"
+          ))
+          Text(String(
+            localized: "PreviewSpaceShortcutHelp",
+            defaultValue: """
+            Press Space to open or close the selected item's preview. \
+            To search, click the search field or press ⌘F first. \
+            Space inserts a space while the search field is focused.
+            """,
+            table: "GeneralSettings"
+          ))
+          .fixedSize(horizontal: false, vertical: true)
+          .foregroundStyle(.secondary)
+          .font(.caption)
+        }
+        .accessibilityLabel(Text("ShowPreview", tableName: "GeneralSettings"))
       }
 
       Settings.Section(

@@ -3,14 +3,13 @@ import SwiftUI
 
 struct HistoryListView: View {
   @Binding var searchQuery: String
-  @FocusState.Binding var searchFocused: Bool
+  @FocusState.Binding var keyboardFocus: ClipboardKeyboardFocus?
 
   @Environment(AppState.self) private var appState
   @Environment(ModifierFlags.self) private var modifierFlags
   @Environment(\.scenePhase) private var scenePhase
 
   @Default(.pinTo) private var pinTo
-  @Default(.previewDelay) private var previewDelay
   @Default(.showFooter) private var showFooter
 
   private var pinnedItems: [HistoryItemDecorator] {
@@ -130,16 +129,12 @@ struct HistoryListView: View {
         }
         .onChange(of: scenePhase) {
           if scenePhase == .active {
-            searchFocused = true
+            keyboardFocus = .list
             appState.navigator.isKeyboardNavigating = true
             appState.navigator.select(item: appState.history.firstUnpinnedItem ?? appState.history.firstPinnedItem)
-            appState.preview.enableAutoOpen()
-            appState.preview.resetAutoOpenSuppression()
-            appState.preview.startAutoOpen()
           } else {
             modifierFlags.flags = []
             appState.navigator.isKeyboardNavigating = true
-            appState.preview.cancelAutoOpen()
           }
         }
         // Calculate the total height inside a scroll view.

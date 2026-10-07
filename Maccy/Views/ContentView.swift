@@ -1,12 +1,17 @@
 import SwiftData
 import SwiftUI
 
+enum ClipboardKeyboardFocus: Hashable {
+  case list
+  case search
+}
+
 struct ContentView: View {
   @State private var appState = AppState.shared
   @State private var modifierFlags = ModifierFlags()
   @State private var scenePhase: ScenePhase = .background
 
-  @FocusState private var searchFocused: Bool
+  @FocusState private var keyboardFocus: ClipboardKeyboardFocus?
 
   var body: some View {
     ZStack {
@@ -16,18 +21,15 @@ struct ContentView: View {
         VisualEffectView()
       }
 
-      KeyHandlingView(searchQuery: $appState.history.searchQuery, searchFocused: $searchFocused) {
+      KeyHandlingView(searchQuery: $appState.history.searchQuery, keyboardFocus: $keyboardFocus) {
         VStack(spacing: 0) {
-          SlideoutView(controller: appState.preview) {
-            HeaderView(
-              controller: appState.preview,
-              searchFocused: $searchFocused
-            )
+          VStack(spacing: 0) {
+            HeaderView(keyboardFocus: $keyboardFocus)
 
             VStack(alignment: .leading, spacing: 0) {
               HistoryListView(
                 searchQuery: $appState.history.searchQuery,
-                searchFocused: $searchFocused
+                keyboardFocus: $keyboardFocus
               )
 
               FooterView(footer: appState.footer)
@@ -38,14 +40,13 @@ struct ContentView: View {
               value: appState.history.pasteStack?.id
             )
             .padding(.horizontal, Popup.horizontalPadding)
-            .onAppear {
-              searchFocused = true
-            }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($keyboardFocus, equals: .list)
+            .accessibilityIdentifier("clipboard-list-keyboard-focus")
             .onMouseMove {
               appState.navigator.isKeyboardNavigating = false
             }
-          } slideout: {
-            SlideoutContentView()
           }
           .frame(minHeight: 0)
           .layoutPriority(1)
@@ -54,6 +55,7 @@ struct ContentView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .task {
         try? await appState.history.load()
+        keyboardFocus = .list
       }
     }
     .animation(.easeInOut(duration: 0.2), value: appState.searchVisible)
@@ -61,27 +63,41 @@ struct ContentView: View {
     .environment(modifierFlags)
     .environment(\.scenePhase, scenePhase)
     .onChange(of: appState.isEditingItem) { _, isEditingItem in
-      // A sheet's text controls otherwise remain the logical focus target after
-      // dismissal, preventing the popup's key handler from receiving shortcuts.
-      searchFocused = !isEditingItem
+      if !isEditingItem {
+        keyboardFocus = .list
+      }
+    }
+    .onChange(of: keyboardFocus) { _, focus in
+      appState.isSearchFocused = focus == .search
+    }
+    .onChange(of: appState.keyboardFocusRequestID) { _, _ in
+      if !appState.isEditingItem {
+        keyboardFocus = appState.requestedKeyboardFocus
+      }
+    }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active {
+        keyboardFocus = .list
+      }
     }
     // FloatingPanel is not a scene, so let's implement custom scenePhase..
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) {
       guard !appState.isEditingItem else { return }
 
       if let window = $0.object as? NSWindow,
-         let bundleIdentifier = Bundle.main.bundleIdentifier,
-         window.identifier == NSUserInterfaceItemIdentifier(bundleIdentifier) {
+         window === appState.appDelegate?.panel || appState.preview.owns(window) {
         scenePhase = .active
       }
     }
-    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) {
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
       guard !appState.isEditingItem else { return }
 
-      if let window = $0.object as? NSWindow,
-         let bundleIdentifier = Bundle.main.bundleIdentifier,
-         window.identifier == NSUserInterfaceItemIdentifier(bundleIdentifier) {
-        scenePhase = .background
+      // AppKit reports resignation before the next key window is established.
+      // Treat list + preview as one interaction so preview clicks don't clear search.
+      DispatchQueue.main.async {
+        if appState.appDelegate?.panel.isKeyWindow != true && appState.preview.window?.isKeyWindow != true {
+          scenePhase = .background
+        }
       }
     }
   }

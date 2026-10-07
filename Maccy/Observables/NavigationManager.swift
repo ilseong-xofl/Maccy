@@ -48,13 +48,7 @@ class NavigationManager { // swiftlint:disable:this type_body_length
         }
       }
 
-      let preview = AppState.shared.preview
-      if leadHistoryItem != nil {
-        preview.resetAutoOpenSuppression()
-        preview.startAutoOpen()
-      } else {
-        preview.cancelAutoOpen()
-      }
+      AppState.shared.preview.selectionDidChange()
     }
   }
 

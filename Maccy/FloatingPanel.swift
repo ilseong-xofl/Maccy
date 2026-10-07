@@ -4,6 +4,7 @@ import SwiftUI
 // An NSPanel subclass that implements floating panel traits.
 // https://stackoverflow.com/questions/46023769/how-to-show-a-window-without-stealing-focus-on-macos
 class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
+  static var minimumListWidth: CGFloat { 200 }
   var isPresented: Bool = false
   var statusBarButton: NSStatusBarButton?
   let onClose: () -> Void
@@ -59,13 +60,11 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
         }
       )
     )
-    // SlideoutView fixes the list width between resize gestures. Do not let
-    // NSHostingView turn that current width into the window's minimum size,
-    // which would prevent the next gesture from making the window narrower.
+    // Keep native resizing independent of SwiftUI's current layout size.
     hostingView.sizingOptions = []
     contentView = hostingView
     contentMinSize = NSSize(
-      width: AppState.shared.preview.minimumContentWidth,
+      width: Self.minimumListWidth,
       height: AppState.shared.popup.minimumHeight
     )
     applyRoundedCorners()
@@ -95,13 +94,10 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     let requestedSize = Defaults[.windowSize]
     let visibleFrame = targetScreen(at: popupPosition)?.visibleFrame
     let finalSize = NSSize(
-      width: min(max(requestedSize.width, appState.preview.minimumContentWidth), visibleFrame?.width ?? .infinity),
+      width: min(max(requestedSize.width, Self.minimumListWidth), visibleFrame?.width ?? .infinity),
       height: min(max(requestedSize.height, appState.popup.minimumHeight), visibleFrame?.height ?? .infinity)
     )
-    appState.preview.contentWidth = finalSize.width
-    // The slideout's width callback saves changes. A screen constraint is temporary,
-    // so retain the user's requested size until they resize the window themselves.
-    Defaults[.windowSize] = requestedSize
+    appState.isSearchFocused = false
     setContentSize(finalSize)
     var origin = popupPosition.origin(size: frame.size, statusBarButton: statusBarButton)
     if let visibleFrame {
@@ -112,6 +108,10 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     orderFrontRegardless()
     makeKey()
     isPresented = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.isPresented, self.isKeyWindow else { return }
+      AppState.shared.requestKeyboardFocus(.list)
+    }
 
     if popupPosition == .statusItem {
       DispatchQueue.main.async {
@@ -151,19 +151,9 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     }
   }
 
-  func determinePreviewPlacement() {
-    let preview = AppState.shared.preview
-    guard !preview.state.isOpen else { return }
-    let newSize = preview.computeSizeWithPreview(frame.size, state: .open)
-    preview.placement = preview.computePlacement(window: self, for: newSize)
-  }
-
   func saveWindowPosition() {
     if let screenFrame = screen?.visibleFrame {
-      // Only store the size of the window without the preview
-      let width = AppState.shared.preview.contentWidth
-
-      let anchorX = frame.minX + width / 2 - screenFrame.minX
+      let anchorX = frame.midX - screenFrame.minX
       let anchorY = frame.maxY - screenFrame.minY
       Defaults[.windowPosition] = NSPoint(x: anchorX / screenFrame.width, y: anchorY / screenFrame.height)
     }
@@ -175,26 +165,8 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-    let preview = AppState.shared.preview
-
-    if inLiveResize {
-      startResizeIfNeeded()
-    }
-
     var finalFrameSize = frameSize
-    var minContent = preview.minimumContentWidth
-    var minPreview = 0.0
-
-    if inLiveResize && preview.resizingMode != .none {
-      if preview.resizingMode == .content && preview.state == .open {
-        minPreview = preview.slideoutWidth
-      }
-      if preview.resizingMode == .slideout {
-        minPreview = preview.minimumSlideoutWidth
-        minContent = preview.contentWidth
-      }
-    }
-    finalFrameSize.width = max(finalFrameSize.width, minContent + minPreview)
+    finalFrameSize.width = max(finalFrameSize.width, Self.minimumListWidth)
 
     let minimumHeight = AppState.shared.popup.minimumHeight
     finalFrameSize.height = max(finalFrameSize.height, minimumHeight)
@@ -207,70 +179,42 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     return finalFrameSize
   }
 
-  private func startResizeIfNeeded() {
-    let preview = AppState.shared.preview
-    guard preview.resizingMode == .none else { return }
-
-    let windowPoint = convertPoint(fromScreen: NSEvent.mouseLocation)
-    let location: SlideoutPlacement = windowPoint.x <= frame.width / 2 ? .left : .right
-    if location == preview.placement && preview.state == .open {
-      preview.startResize(mode: .slideout)
-    } else {
-      preview.startResize(mode: .content)
-    }
-  }
-
-  func windowWillMove(_ notification: Notification) {
-    determinePreviewPlacement()
-  }
-
   func windowDidMove(_ notification: Notification) {
-    determinePreviewPlacement()
+    AppState.shared.preview.reposition()
   }
 
   func windowWillStartLiveResize(_ notification: Notification) {
-    AppState.shared.preview.cancelAutoOpen()
-    // Release the fixed list/preview width before AppKit proposes a smaller
-    // window size, instead of waiting for the first windowWillResize callback.
-    startResizeIfNeeded()
     contentView?.layoutSubtreeIfNeeded()
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
-    let preview = AppState.shared.preview
-    preview.endResize()
-    var size = frame.size
-    // Save the final list width, excluding the independently sized preview.
-    size.width = preview.contentWidth
-    saveWindowFrame(frame: NSRect(origin: frame.origin, size: size))
-    preview.startAutoOpen()
+    saveWindowFrame(frame: frame)
+    AppState.shared.preview.reposition()
   }
 
-  func windowDidBecomeKey(_ notification: Notification) {
-    AppState.shared.preview.enableAutoOpen()
-
-    if AppState.shared.navigator.leadHistoryItem != nil {
-      AppState.shared.preview.startAutoOpen()
-    }
-  }
-
-  func windowDidResignKey(_ notification: Notification) {
-    AppState.shared.preview.disableAutoOpen()
+  func windowDidResize(_ notification: Notification) {
+    AppState.shared.preview.reposition()
   }
 
   // Close automatically when out of focus, e.g. outside click.
   override func resignKey() {
     super.resignKey()
-    // Don't hide while a modal interaction from this panel is active.
-    if NSApp.alertWindow == nil && !AppState.shared.suppressPopupAutoClose {
-      close()
+    // Wait until AppKit has installed the next key window. Clicking or resizing
+    // the detached preview must not dismiss either window.
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.isPresented, !self.isKeyWindow else { return }
+      let state = AppState.shared
+      if NSApp.alertWindow == nil && !state.suppressPopupAutoClose && !state.preview.owns(NSApp.keyWindow) {
+        self.close()
+      }
     }
   }
 
   override func close() {
     super.close()
     let appState = AppState.shared
-    appState.preview.state = .closed
+    appState.preview.close()
+    appState.isSearchFocused = false
     appState.isEditingItem = false
     appState.navigator.isDragAndDropInProgress = false
     appState.navigator.isManualMultiSelect = false

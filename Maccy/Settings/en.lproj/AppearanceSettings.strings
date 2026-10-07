@@ -18,6 +18,10 @@
 "TextPreviewLinesTooltip" = "Maximum visible lines per text item after wrapping to the window width. Short items use only the space they need.\nRange: 1–20. Default: 5.";
 "ImageHeight" = "Maximum image height:";
 "ImageHeightTooltip" = "Fit the entire image within the window width and this height while preserving its proportions. Small images are not enlarged.\nRange: 1–600. Default: 300.";
+"PreviewDirection" = "Preview window side:";
+"PreviewDirectionRight" = "Right";
+"PreviewDirectionLeft" = "Left";
+"PreviewDirectionTooltip" = "Open the preview on this side of the clipboard window. Use the opposite side when there is not enough space.\nDefault: Right.";
 "OpenPreviewAutomatically" = "Open Preview automatically";
 "PreviewDelay" = "Preview delay:";
 "PreviewDelayTooltip" = "Delay in milliseconds until a preview popup is shown.\nDefault: 1500.";
