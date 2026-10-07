@@ -58,6 +58,13 @@ struct ContentView: View {
       WindowResizeIndicator()
         .padding(3)
     }
+    .overlay {
+      if appState.isConfirmingQuit {
+        Color.black.opacity(0.18)
+          .ignoresSafeArea()
+          .accessibilityHidden(true)
+      }
+    }
     .animation(.easeInOut(duration: 0.2), value: appState.searchVisible)
     .environment(appState)
     .environment(modifierFlags)

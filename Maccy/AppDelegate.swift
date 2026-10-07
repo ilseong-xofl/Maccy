@@ -236,6 +236,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   #endif
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    if raiseQuitAlert() { return true }
     #if DEBUG
     // UI tools can send a reopen event while focusing the demo's preview window.
     // Keep its fixtures visible instead of toggling away the window under test.
@@ -249,10 +250,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    if let quitAlert {
-      quitAlert.window.makeKeyAndOrderFront(nil)
-      return .terminateCancel
-    }
+    if raiseQuitAlert() { return .terminateCancel }
 
     let state = AppState.shared
     let previousWindow = sender.keyWindow
@@ -264,10 +262,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let cancel = alert.addButton(withTitle: String(localized: "clear_alert_cancel"))
     alert.addButton(withTitle: String(localized: "quit")).keyEquivalent = ""
     alert.window.defaultButtonCell = cancel.cell as? NSButtonCell
-    alert.window.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+    alert.window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
 
     quitAlert = alert
     state.isConfirmingQuit = true
+    // runModal configures its own window level. Keep both status-bar-level panels
+    // below AppKit's modal level instead of relying on the alert's pre-show level.
+    let floatingWindows: [NSWindow] = [panel, state.preview.window].compactMap { $0 }
+    let savedLevels = floatingWindows.map { ($0, $0.level) }
+    floatingWindows.forEach { $0.level = .normal }
+    var shouldQuit = false
     // The default button owns Return; handle Escape without replacing that equivalent.
     let escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
       if event.keyCode == 53, sender.modalWindow === alert.window {
@@ -278,18 +282,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     defer {
       if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+      for (window, level) in savedLevels { window.level = level }
+      if !shouldQuit {
+        if let previousWindow, previousWindow.isVisible {
+          previousWindow.makeKeyAndOrderFront(nil)
+        } else if panel?.isPresented == true {
+          panel.makeKeyAndOrderFront(nil)
+        }
+      }
       quitAlert = nil
       state.isConfirmingQuit = false
     }
     sender.activate(ignoringOtherApps: true)
-    if alert.runModal() == .alertSecondButtonReturn { return .terminateNow }
+    shouldQuit = alert.runModal() == .alertSecondButtonReturn
+    return shouldQuit ? .terminateNow : .terminateCancel
+  }
 
-    if let previousWindow, previousWindow.isVisible {
-      previousWindow.makeKeyAndOrderFront(nil)
-    } else if panel?.isPresented == true {
-      panel.makeKeyAndOrderFront(nil)
-    }
-    return .terminateCancel
+  private func raiseQuitAlert() -> Bool {
+    guard let quitAlert else { return false }
+    NSApp.activate(ignoringOtherApps: true)
+    quitAlert.window.makeKeyAndOrderFront(nil)
+    return true
   }
 
   func applicationWillTerminate(_ notification: Notification) {
@@ -355,6 +368,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc
   private func performStatusItemClick() {
+    if raiseQuitAlert() { return }
     let modifierFlags = (NSApp.currentEvent?.modifierFlags ?? [])
       .union(NSEvent.modifierFlags)
       .intersection(.deviceIndependentFlagsMask)

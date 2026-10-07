@@ -34,6 +34,13 @@ struct SlideoutContentView: View {
     .padding(.horizontal, Self.horizontalPadding)
     .padding(.bottom, 6)
     .padding(.top, 3)
+    .overlay {
+      if appState.isConfirmingQuit {
+        Color.black.opacity(0.18)
+          .ignoresSafeArea()
+          .accessibilityHidden(true)
+      }
+    }
   }
 
 }
