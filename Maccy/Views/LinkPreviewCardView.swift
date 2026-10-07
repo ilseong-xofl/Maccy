@@ -109,7 +109,7 @@ struct LinkPreviewCardView: View {
 
       HStack(spacing: 5) {
         Image(systemName: "link")
-          .font(.system(size: fontSize - 3, weight: .medium))
+          .font(.system(size: fontSize - 5, weight: .medium))
         Text(verbatim: preview.url.absoluteString)
           .font(.system(size: fontSize - 2))
           .lineLimit(1)
