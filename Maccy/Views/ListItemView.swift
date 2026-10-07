@@ -123,6 +123,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       if let isFavorite {
         FavoriteStarIcon(isFilled: isFavorite)
           .foregroundStyle(isFavorite ? FavoriteAppearance.color : Color.secondary)
+          .frame(width: 14, height: 14)
           .frame(width: 15, height: 15)
           .padding(.leading, accessoryEdgePadding)
           .padding(.trailing, accessoryContentSpacing)

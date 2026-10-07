@@ -67,7 +67,7 @@ struct FooterView: View {
         if filter == .favorites {
           FavoriteStarIcon(isFilled: true)
             .foregroundStyle(tint)
-            .frame(width: 15, height: 15)
+            .frame(width: 14, height: 14)
         } else {
           Image(systemName: symbol).foregroundStyle(tint)
         }
