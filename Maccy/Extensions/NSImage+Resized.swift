@@ -9,6 +9,7 @@ enum ClipboardImageSource: Sendable {
   struct Preview: Sendable {
     let image: CGImage
     let pixelSize: CGSize
+    let sourceByteCount: Int64?
     let refreshedBookmark: Data?
   }
 
@@ -24,6 +25,7 @@ enum ClipboardImageSource: Sendable {
   nonisolated private func load(maxPixelSize: Int) -> Preview? {
     let options = [kCGImageSourceShouldCache: false] as CFDictionary
     let source: CGImageSource?
+    let sourceByteCount: Int64?
     var scopedURL: URL?
     var refreshedBookmark: Data?
     defer { scopedURL?.stopAccessingSecurityScopedResource() }
@@ -31,6 +33,7 @@ enum ClipboardImageSource: Sendable {
     switch self {
     case .data(let data):
       source = CGImageSourceCreateWithData(data as CFData, options)
+      sourceByteCount = Int64(data.count)
     case .file(let originalURL, let bookmark):
       var url = originalURL
       var stale = false
@@ -48,11 +51,13 @@ enum ClipboardImageSource: Sendable {
         refreshedBookmark = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
                                                   includingResourceValuesForKeys: nil, relativeTo: nil)
       }
-      guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isUbiquitousItemKey,
+      guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isUbiquitousItemKey,
                                                           .ubiquitousItemDownloadingStatusKey]),
             values.isRegularFile == true,
             values.isUbiquitousItem != true || values.ubiquitousItemDownloadingStatus == .current else { return nil }
       source = CGImageSourceCreateWithURL(url as CFURL, options)
+      // Read the original file size while its security scope is still open.
+      sourceByteCount = values.fileSize.map(Int64.init)
     }
 
     guard let source,
@@ -69,7 +74,8 @@ enum ClipboardImageSource: Sendable {
     let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
     let size = CGSize(width: width.doubleValue, height: height.doubleValue)
     let orientedSize = (5...8).contains(orientation) ? CGSize(width: size.height, height: size.width) : size
-    return Preview(image: image, pixelSize: orientedSize, refreshedBookmark: refreshedBookmark)
+    return Preview(image: image, pixelSize: orientedSize, sourceByteCount: sourceByteCount,
+                   refreshedBookmark: refreshedBookmark)
   }
 }
 

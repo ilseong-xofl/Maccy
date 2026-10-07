@@ -1,133 +1,137 @@
 import AppKit
-import KeyboardShortcuts
 import SwiftUI
 
 struct PreviewItemView: View {
   private static let largeTextThreshold = 1_000
+  private static let contentSpacing: CGFloat = 10
 
   var item: HistoryItemDecorator
-
-  @ViewBuilder
-  func previewImage(content: () -> some View) -> some View {
-    content()
-      .aspectRatio(contentMode: .fit)
-      .clipShape(.rect(cornerRadius: 5))
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-  }
+  @State private var metadataHeight: CGFloat = 114
 
   var body: some View {
     GeometryReader { geometry in
-      let metadataHeight = min(140, max(0, geometry.size.height) * 0.45)
-      let previewHeight = max(0, geometry.size.height - metadataHeight - 17)
+      let informationHeight = min(metadataHeight, max(0, geometry.size.height) * 0.5)
+      let availableHeight = max(0, geometry.size.height - informationHeight - Self.contentSpacing)
 
-      VStack(alignment: .leading, spacing: 8) {
+      VStack(spacing: Self.contentSpacing) {
         previewContent
           .frame(maxWidth: .infinity)
-          .frame(height: previewHeight)
+          .frame(height: contentHeight(width: geometry.size.width, maximum: availableHeight), alignment: .top)
           .clipped()
 
-        Divider()
-
-        // Metadata remains reachable at the preview window's minimum size and in long locales.
         ScrollView {
           metadata
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .readHeight($metadataHeight)
         }
-        .frame(height: metadataHeight)
+        .frame(height: informationHeight)
+        .scrollBounceBehavior(.basedOnSize)
+        .background(.primary.opacity(0.035), in: .rect(cornerRadius: 8))
         .id("metadata-\(item.id)")
       }
-      .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+      .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
     }
-    .controlSize(.small)
+  }
+
+  private func contentHeight(width: CGFloat, maximum: CGFloat) -> CGFloat {
+    guard item.hasImage, let size = item.imagePixelSize,
+          size.width > 0, size.height > 0 else { return maximum }
+    // Reserve only the height the image actually occupies. Information follows
+    // the image instead of sitting below an empty, vertically centered canvas.
+    return min(maximum, max(0, width) * size.height / size.width)
   }
 
   @ViewBuilder
   private var previewContent: some View {
     if item.hasImage {
       AsyncView<NSImage?, _, _>(id: item.id) {
-        return await item.asyncGetPreviewImage()
+        await item.asyncGetPreviewImage()
       } content: { image in
         if let image {
-          previewImage {
-            Image(nsImage: image)
-              .resizable()
-          }
+          Image(nsImage: image)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .clipShape(.rect(cornerRadius: 4))
         } else {
-          previewImage {
-            ZStack {
-              Color.gray.opacity(0.3)
-              Image(systemName: "photo.badge.exclamationmark")
-                .symbolRenderingMode(.multicolor)
-            }
+          imagePlaceholder {
+            Image(systemName: "photo.badge.exclamationmark")
+              .symbolRenderingMode(.multicolor)
           }
         }
       } placeholder: {
-        previewImage {
-          ZStack {
-            Color.gray.opacity(0.3)
-            ProgressView()
-          }
-        }
+        imagePlaceholder { ProgressView() }
       }
     } else if item.previewText.byteCount >= Self.largeTextThreshold {
       LargeTextView(text: item.previewText.string)
+        .padding(8)
         .id("textpreview-\(item.id)")
     } else {
       ScrollView {
         Text(item.previewText.string)
-          .font(.body)
+          .font(.system(size: 14))
           .frame(maxWidth: .infinity, alignment: .leading)
           .fixedSize(horizontal: false, vertical: true)
+          .padding(8)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .id("textpreview-\(item.id)")
     }
   }
 
+  private func imagePlaceholder<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    ZStack {
+      Color.primary.opacity(0.04)
+      content()
+    }
+    .clipShape(.rect(cornerRadius: 4))
+  }
+
   private var metadata: some View {
-    VStack(alignment: .leading, spacing: 3) {
+    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+      if let size = item.imagePixelSize {
+        metadataRow("Dimensions") {
+          Text(verbatim: "\(Int(size.width)) × \(Int(size.height))")
+            .monospacedDigit()
+        }
+      }
+
+      metadataRow("Copied") {
+        Text(item.item.lastCopiedAt.formatted(date: .abbreviated, time: .shortened))
+          .monospacedDigit()
+      }
+
       if let application = item.application {
-        metadataRow("Application") {
-          HStack(spacing: 3) {
-            AppImageView(appImage: item.applicationImage, size: NSSize(width: 11, height: 11))
+        metadataRow("From App") {
+          HStack(spacing: 6) {
+            AppImageView(appImage: item.applicationImage, size: NSSize(width: 16, height: 16))
             Text(application)
           }
         }
       }
 
-      if let size = item.imagePixelSize {
-        metadataRow("Dimensions") {
-          Text("\(Int(size.width))×\(Int(size.height))")
-        }
-      }
-
-      metadataRow("FirstCopyTime") {
-        Text("\(item.item.firstCopiedAt, style: .date) \(item.item.firstCopiedAt, style: .time)")
-      }
-      metadataRow("LastCopyTime") {
-        Text("\(item.item.lastCopiedAt, style: .date) \(item.item.lastCopiedAt, style: .time)")
-      }
-      metadataRow("NumberOfCopies") {
-        Text(String(item.item.numberOfCopies))
+      metadataRow("Clipping Size") {
+        Text(ByteCountFormatter.string(fromByteCount: item.clippingByteCount, countStyle: .file))
+          .monospacedDigit()
       }
     }
+    .font(.system(size: 14))
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
-  private func metadataRow<Content: View>(_ key: String, @ViewBuilder content: () -> Content) -> some View {
-    ViewThatFits(in: .horizontal) {
-      HStack(alignment: .firstTextBaseline, spacing: 3) {
-        Text(LocalizedStringKey(key), tableName: "PreviewItemView")
-        content()
-      }
-      .fixedSize(horizontal: true, vertical: false)
+  private func metadataRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+    GridRow(alignment: .firstTextBaseline) {
+      Text(verbatim: label)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.trailing)
+        .frame(width: 96, alignment: .trailing)
 
-      VStack(alignment: .leading, spacing: 2) {
-        Text(LocalizedStringKey(key), tableName: "PreviewItemView")
-          .foregroundStyle(.secondary)
-        content()
-          .fixedSize(horizontal: false, vertical: true)
-      }
+      content()
+        .fontWeight(.medium)
+        .foregroundStyle(.primary)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }

@@ -428,13 +428,15 @@ class ClipboardImagePreviewTests: XCTestCase {
   }
 
   func testFileURLOnlyPNGShowsImageWithoutChangingClipboardPayload() async throws {
-    let url = try imageFile()
+    let originalData = try imageData()
+    let url = try imageFile(data: originalData)
     let value = url.dataRepresentation
     let item = decorator([(.fileURL, value)])
     await item.sizeImages()
 
     XCTAssertEqual(item.imagePixelSize, NSSize(width: 800, height: 400))
     XCTAssertNotNil(item.thumbnailImage)
+    XCTAssertEqual(item.clippingByteCount, Int64(originalData.count))
     XCTAssertEqual(item.item.contents.count, 1)
     XCTAssertEqual(item.item.contents.first?.type, NSPasteboard.PasteboardType.fileURL.rawValue)
     XCTAssertEqual(item.item.contents.first?.value, value)
@@ -451,15 +453,19 @@ class ClipboardImagePreviewTests: XCTestCase {
 
   func testRawImageWinsOverFileURL() async throws {
     let url = try imageFile()
-    let item = decorator([(.fileURL, url.dataRepresentation), (.png, try imageData(width: 120, height: 80))])
+    let originalData = try imageData(width: 120, height: 80)
+    let item = decorator([(.fileURL, url.dataRepresentation), (.png, originalData)])
     await item.sizeImages()
     XCTAssertEqual(item.imagePixelSize, NSSize(width: 120, height: 80))
+    XCTAssertEqual(item.clippingByteCount, Int64(originalData.count))
   }
 
   func testInvalidFirstRepresentationDoesNotHideValidImage() async throws {
-    let item = decorator([(.png, Data("invalid".utf8)), (.tiff, try imageData(format: .tiff))])
+    let validData = try imageData(format: .tiff)
+    let item = decorator([(.png, Data("invalid".utf8)), (.tiff, validData)])
     await item.sizeImages()
     XCTAssertNotNil(item.thumbnailImage)
+    XCTAssertEqual(item.clippingByteCount, Int64(validData.count))
   }
 
   func testNilFirstRepresentationDoesNotHideValidImage() async throws {
@@ -508,11 +514,20 @@ class ClipboardImagePreviewTests: XCTestCase {
   }
 
   func testLargeImageIsDownsampledAndReportsOriginalDimensions() async throws {
-    let item = decorator([(.png, try imageData(width: 4096, height: 1024))])
+    let originalData = try imageData(width: 4096, height: 1024)
+    let item = decorator([(.png, originalData)])
     await item.sizeImages()
     XCTAssertEqual(item.imagePixelSize, NSSize(width: 4096, height: 1024))
     let thumbnail = try XCTUnwrap(item.thumbnailImage)
     XCTAssertEqual(thumbnail.size, NSSize(width: 2048, height: 512))
+    XCTAssertEqual(item.clippingByteCount, Int64(originalData.count))
+  }
+
+  func testNonImageClippingSizeIncludesStoredRepresentations() {
+    let text = Data("클립보드".utf8)
+    let html = Data("<b>클립보드</b>".utf8)
+    let item = decorator([(.string, text), (.html, html), (.rtf, nil)])
+    XCTAssertEqual(item.clippingByteCount, Int64(text.count + html.count))
   }
 
   func testCleanupAllowsThumbnailRegeneration() async throws {

@@ -50,12 +50,18 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   private var imageGenerationID = UUID()
   var previewImage: NSImage?
   private(set) var imagePixelSize: NSSize?
+  private var imageSourceByteCount: Int64?
   private(set) var previewText = SizedString("")
   var thumbnailImage: NSImage?
   var applicationImage: ApplicationImage
 
   // 10k characters seems to be more than enough on large displays
   var text: String { previewText.string.shortened(to: 10_000) }
+
+  /// Report the source image's bytes, never the size of its generated thumbnail.
+  var clippingByteCount: Int64 {
+    imageSourceByteCount ?? item.contents.reduce(Int64(0)) { $0 + Int64($1.value?.count ?? 0) }
+  }
 
   var isPinned: Bool { item.pin != nil }
   var isUnpinned: Bool { item.pin == nil }
@@ -133,6 +139,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
       guard let result else { return }
       let image = NSImage(cgImage: result.image, size: NSSize(width: result.image.width, height: result.image.height))
       self.imagePixelSize = result.pixelSize
+      self.imageSourceByteCount = result.sourceByteCount
       self.thumbnailImage = image
       self.previewImage = image
       if let bookmark = result.refreshedBookmark { self.item.previewImageBookmark = bookmark }
@@ -164,6 +171,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     thumbnailImage = nil
     previewImage = nil
     imagePixelSize = nil
+    imageSourceByteCount = nil
     item.clearDecodedImageCache()
   }
 
