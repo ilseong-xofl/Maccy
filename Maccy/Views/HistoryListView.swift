@@ -74,37 +74,49 @@ struct HistoryListView: View {
     let scrollTopPadding = topSeparatorVisible ? Popup.verticalSeparatorPadding : topPadding
     let scrollBottomPadding = bottomSeparatorVisible ? Popup.verticalSeparatorPadding : bottomPadding
 
-    VStack(spacing: 0) {
-      if let stack = appState.history.pasteStack,
-         !stack.items.isEmpty {
-        PasteStackView(stack: stack)
-
-        if topPinsVisible {
-          separator()
-        }
-      }
-
-      if topPinsVisible {
-        PinsView(items: pinnedItems)
-      }
-
-      if topSeparatorVisible {
-        topSeparator()
-      } else if showFooter && historyEmpty {
-        Spacer()
-          .frame(height: Popup.verticalSeparatorPadding)
-      }
-    }
-    .padding(.top, topSeparatorVisible ? topPadding : 0)
-    .readHeight(appState, into: \.popup.extraTopHeight)
-
     ScrollView {
       ScrollViewReader { proxy in
-        MultipleSelectionListView(items: unpinnedItems) { previous, item, next, index in
-          HistoryItemView(item: item, previous: previous, next: next, index: index)
+        LazyVStack(spacing: 0) {
+          VStack(spacing: 0) {
+            if let stack = appState.history.pasteStack,
+               !stack.items.isEmpty {
+              PasteStackView(stack: stack)
+
+              if topPinsVisible {
+                separator()
+              }
+            }
+
+            if topPinsVisible {
+              PinsView(items: pinnedItems)
+            }
+
+            if topSeparatorVisible {
+              topSeparator()
+            } else if showFooter && historyEmpty {
+              Spacer()
+                .frame(height: Popup.verticalSeparatorPadding)
+            }
+          }
+          .padding(.top, topSeparatorVisible ? topPadding : 0)
+
+          MultipleSelectionListView(items: unpinnedItems) { previous, item, next, index in
+            HistoryItemView(item: item, previous: previous, next: next, index: index)
+          }
+          .padding(.top, scrollTopPadding)
+          .padding(.bottom, scrollBottomPadding)
+
+          VStack(spacing: 0) {
+            if bottomSeparatorVisible {
+              bottomSeparator()
+            }
+
+            if bottomPinsVisible {
+              PinsView(items: pinnedItems)
+            }
+          }
+          .padding(.bottom, bottomPinsVisible ? bottomPadding : 0)
         }
-        .padding(.top, scrollTopPadding)
-        .padding(.bottom, scrollBottomPadding)
         .task(id: appState.navigator.scrollTarget) {
           guard appState.navigator.scrollTarget != nil else { return }
 
@@ -150,17 +162,11 @@ struct HistoryListView: View {
       .contentMargins(.bottom, scrollBottomPadding, for: .scrollIndicators)
     }
     .accessibilityIdentifier("history-scroll-view")
-
-    VStack(spacing: 0) {
-      if bottomSeparatorVisible {
-        bottomSeparator()
-      }
-
-      if bottomPinsVisible {
-        PinsView(items: pinnedItems)
-      }
+    .onAppear {
+      // Pins and the paste stack now scroll with the history; they no longer
+      // contribute a fixed minimum height outside the scroll view.
+      appState.popup.extraTopHeight = 0
+      appState.popup.extraBottomHeight = 0
     }
-    .padding(.bottom, bottomPinsVisible ? bottomPadding : 0)
-    .readHeight(appState, into: \.popup.extraBottomHeight)
   }
 }

@@ -1,3 +1,16 @@
+# Maccy Preview
+
+This is an independent development fork of [Maccy](https://github.com/p0deje/Maccy), with resizable, multiline clipboard previews. It is not an official Maccy release.
+
+- Text rows wrap to the window width and use only the height they need.
+- Configure a maximum of 1–20 visible lines (default: 5) in Appearance settings.
+- User-selected window dimensions persist, including while searching.
+- App identity, preferences, and clipboard history are separate from Maccy. Official Maccy auto-updates are disabled for this fork.
+
+한국어 사용법과 빌드 방법: [FORK.md](FORK.md). Original project documentation follows.
+
+---
+
 > [!WARNING]
 > **Beware of fake websites impersonating Maccy.** Malicious sites (such as `maccyapp.net` and `maccyapp.com`) distribute malware disguised as Maccy. [**maccy.app**](https://maccy.app) is the **only** official website.
 

@@ -14,7 +14,8 @@ struct ListHeaderView: View {
   var body: some View {
     HStack {
       if showTitle {
-        Text("Maccy")
+        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Maccy Preview")
+          .lineLimit(1)
           .foregroundStyle(.secondary)
           .padding(.leading, 5)
       }

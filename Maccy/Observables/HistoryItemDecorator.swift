@@ -18,6 +18,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   let id = UUID()
 
   var title: String = ""
+  private(set) var listText: String = ""
   var attributedTitle: AttributedString?
 
   var isVisible: Bool = true
@@ -63,6 +64,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     // We need to hash title and attributedTitle, so SwiftUI knows it needs to update the view if they chage
     hasher.combine(id)
     hasher.combine(title)
+    hasher.combine(listText)
     hasher.combine(attributedTitle)
   }
 
@@ -88,7 +90,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
         )
       )
     } else {
-      parts.append(title)
+      parts.append(listText)
     }
     if let application = application {
       parts.append(application)
@@ -195,12 +197,13 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   }
 
   func highlight(_ query: String, _ ranges: [Range<String.Index>]) {
-    guard !query.isEmpty, !title.isEmpty else {
+    guard !query.isEmpty, !listText.isEmpty else {
       attributedTitle = nil
       return
     }
 
-    var attributedString = AttributedString(title.shortened(to: 500))
+    // Search and rendering must use the same text, including real line breaks.
+    var attributedString = AttributedString(listText)
     for range in ranges {
       if let lowerBound = AttributedString.Index(range.lowerBound, within: attributedString),
          let upperBound = AttributedString.Index(range.upperBound, within: attributedString) {
@@ -244,6 +247,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
       DispatchQueue.main.async {
         guard let self else { return }
         self.title = self.item.title
+        self.synchronizeListText()
         self.synchronizeItemTitle()
       }
     }
@@ -256,6 +260,28 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
       DispatchQueue.main.async { [weak self] in
         self?.synchronizeItemText()
       }
+    }
+    synchronizeListText()
+  }
+
+  private func synchronizeListText() {
+    let source: String
+    if item.imageData != nil || (!title.isEmpty && title != item.generateTitle()) {
+      // Keep user-authored aliases and image OCR titles intact.
+      source = title
+    } else {
+      source = previewText.string
+    }
+
+    let prefix = source.shortened(to: 10_000)
+    let truncated = prefix.utf8.count < source.utf8.count || (source == previewText.string && previewText.isTruncated)
+    let newText = prefix
+      .removingScalarsUnsafeForTitleLayout()
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n") + (truncated ? "…" : "")
+    if listText != newText {
+      listText = newText
+      attributedTitle = nil
     }
   }
 }

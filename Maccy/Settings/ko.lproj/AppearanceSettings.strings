@@ -14,6 +14,8 @@
 "PinToTop" = "상단";
 "PinToBottom" = "하단";
 "PinToTooltip" = "고정된 항목의 위치를 변경합니다.\n기본값: 상단.";
+"TextPreviewLines" = "텍스트 최대 표시 줄 수:";
+"TextPreviewLinesTooltip" = "창 너비에 맞춰 자동 줄바꿈한 뒤 각 텍스트 항목에 표시할 최대 줄 수입니다. 짧은 내용은 필요한 높이만 사용합니다.\n범위: 1–20줄. 기본값: 5줄.";
 "ImageHeight" = "이미지 세로 높이:";
 "ImageHeightTooltip" = "이미지 미리보기 최대 세로 높이.\n기본값: 40.\nHint: 16으로 설정하면 텍스트 항목과 같아 보입니다.";
 "OpenPreviewAutomatically" = "미리보기를 자동으로 열기";

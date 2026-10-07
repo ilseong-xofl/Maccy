@@ -7,6 +7,7 @@ struct AppearanceSettingsPane: View {
   @Default(.popupPosition) private var popupAt
   @Default(.popupScreen) private var popupScreen
   @Default(.pinTo) private var pinTo
+  @Default(.textPreviewLines) private var textPreviewLines
   @Default(.imageMaxHeight) private var imageHeight
   @Default(.openPreviewAutomatically) private var openPreviewAutomatically
   @Default(.previewDelay) private var previewDelay
@@ -20,6 +21,14 @@ struct AppearanceSettingsPane: View {
   @Default(.showApplicationIcons) private var showApplicationIcons
 
   @State private var screens = NSScreen.screens
+
+  private let textPreviewLinesFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
+    formatter.minimum = 1
+    formatter.maximum = 20
+    formatter.allowsFloats = false
+    return formatter
+  }()
 
   private let imageHeightFormatter: NumberFormatter = {
     let formatter = NumberFormatter()
@@ -48,6 +57,26 @@ struct AppearanceSettingsPane: View {
     formatter.maximum = 100_000
     return formatter
   }()
+
+  private var textPreviewLinesLabel: Text {
+    Text(String(
+      localized: "TextPreviewLines",
+      defaultValue: "Maximum text lines:",
+      table: "AppearanceSettings"
+    ))
+  }
+
+  private var textPreviewLinesHelp: Text {
+    Text(String(
+      localized: "TextPreviewLinesTooltip",
+      defaultValue: """
+      Maximum visible lines per text item after wrapping to the window width. \
+      Short items use only the space they need.
+      Range: 1–20. Default: 5.
+      """,
+      table: "AppearanceSettings"
+    ))
+  }
 
   var body: some View {
     Settings.Container(contentWidth: 650) {
@@ -91,6 +120,18 @@ struct AppearanceSettingsPane: View {
         .frame(width: 141, alignment: .leading)
         .help(Text("PinToTooltip", tableName: "AppearanceSettings"))
         .accessibilityLabel(Text("PinTo", tableName: "AppearanceSettings"))
+      }
+
+      Settings.Section(label: { textPreviewLinesLabel }) {
+        HStack {
+          TextField("", value: $textPreviewLines, formatter: textPreviewLinesFormatter)
+            .frame(width: 120)
+            .help(textPreviewLinesHelp)
+            .accessibilityLabel(textPreviewLinesLabel)
+          Stepper("", value: $textPreviewLines, in: 1...20)
+            .labelsHidden()
+            .accessibilityLabel(textPreviewLinesLabel)
+        }
       }
 
       Settings.Section(label: { Text("ImageHeight", tableName: "AppearanceSettings") }) {

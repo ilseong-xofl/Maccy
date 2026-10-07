@@ -42,6 +42,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   var selectionAppearance: SelectionAppearance = .none
   // Complete description used when the row's visual content is hidden from accessibility.
   var accessibilityLabel: String = ""
+  var maxTextLines: Int = 1
   @ViewBuilder var title: () -> Title
 
   @Default(.showApplicationIcons) private var showIcons
@@ -83,9 +84,11 @@ struct ListItemView<Title: View, ID: Hashable>: View {
           .padding(.trailing, 5)
           .padding(.vertical, 5)
       } else {
-        ListItemTitleView(attributedTitle: attributedTitle, title: title)
+        ListItemTitleView(attributedTitle: attributedTitle, maxLines: maxTextLines, title: title)
           .accessibilityHidden(true)
           .padding(.trailing, 5)
+          .padding(.vertical, maxTextLines > 1 ? 6 : 0)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
 
       Spacer()
@@ -116,11 +119,17 @@ struct ListItemView<Title: View, ID: Hashable>: View {
           }
         }
       }
+      .fixedSize(horizontal: true, vertical: false)
       .padding(.trailing, 10)
     }
     .frame(minHeight: Popup.itemHeight)
     .id(id)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .overlay(alignment: .bottom) {
+      if maxTextLines > 1 {
+        Divider().padding(.horizontal, 10).opacity(isSelected ? 0 : 0.45)
+      }
+    }
     .foregroundStyle(isSelected ? Color.white : .primary)
     // macOS 26 broke hovering if no background is present.
     // The slight opcaity white background is a workaround

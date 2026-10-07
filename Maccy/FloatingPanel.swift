@@ -32,7 +32,6 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     self.statusBarButton = statusBarButton
     self.identifier = NSUserInterfaceItemIdentifier(identifier)
 
-    Defaults[.windowSize] = contentRect.size
     delegate = self
 
     animationBehavior = .none
@@ -52,13 +51,22 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     standardWindowButton(.miniaturizeButton)?.isHidden = true
     standardWindowButton(.zoomButton)?.isHidden = true
 
-    contentView = NSHostingView(
+    let hostingView = NSHostingView(
       rootView: FloatingPanelRootView(
         content: view(),
         onWindowDragEnded: { [weak self] in
           self?.saveWindowPosition()
         }
       )
+    )
+    // SlideoutView fixes the list width between resize gestures. Do not let
+    // NSHostingView turn that current width into the window's minimum size,
+    // which would prevent the next gesture from making the window narrower.
+    hostingView.sizingOptions = []
+    contentView = hostingView
+    contentMinSize = NSSize(
+      width: AppState.shared.preview.minimumContentWidth,
+      height: AppState.shared.popup.minimumHeight
     )
     applyRoundedCorners()
   }
@@ -82,13 +90,25 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     }
   }
 
-  func open(height: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
-    let size = Defaults[.windowSize]
-    let miniumHeight: CGFloat = AppState.shared.popup.minimumHeight
-    let finalWidth = min(frame.width, size.width)
-    let finalHeight = max(min(height, size.height), miniumHeight)
-    setContentSize(NSSize(width: finalWidth, height: finalHeight))
-    setFrameOrigin(popupPosition.origin(size: frame.size, statusBarButton: statusBarButton))
+  func open(height _: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
+    let appState = AppState.shared
+    let requestedSize = Defaults[.windowSize]
+    let visibleFrame = targetScreen(at: popupPosition)?.visibleFrame
+    let finalSize = NSSize(
+      width: min(max(requestedSize.width, appState.preview.minimumContentWidth), visibleFrame?.width ?? .infinity),
+      height: min(max(requestedSize.height, appState.popup.minimumHeight), visibleFrame?.height ?? .infinity)
+    )
+    appState.preview.contentWidth = finalSize.width
+    // The slideout's width callback saves changes. A screen constraint is temporary,
+    // so retain the user's requested size until they resize the window themselves.
+    Defaults[.windowSize] = requestedSize
+    setContentSize(finalSize)
+    var origin = popupPosition.origin(size: frame.size, statusBarButton: statusBarButton)
+    if let visibleFrame {
+      origin.x = min(max(origin.x, visibleFrame.minX), visibleFrame.maxX - frame.width)
+      origin.y = min(max(origin.y, visibleFrame.minY), visibleFrame.maxY - frame.height)
+    }
+    setFrameOrigin(origin)
     orderFrontRegardless()
     makeKey()
     isPresented = true
@@ -98,6 +118,25 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
         self.statusBarButton?.isHighlighted = true
       }
     }
+  }
+
+  private func targetScreen(at popupPosition: PopupPosition) -> NSScreen? {
+    switch popupPosition {
+    case .center, .lastPosition:
+      return NSScreen.forPopup
+    case .statusItem:
+      return statusBarButton?.window?.screen ?? NSScreen.main
+    case .window:
+      if let windowFrame = NSWorkspace.shared.frontmostApplication?.windowFrame {
+        let center = NSPoint(x: windowFrame.midX, y: windowFrame.midY)
+        return NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) } ?? NSScreen.main
+      }
+    case .cursor:
+      break
+    }
+
+    let mouseLocation = NSEvent.mouseLocation
+    return NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main
   }
 
   func verticallyResize(to newHeight: CGFloat) {
@@ -138,15 +177,8 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
     let preview = AppState.shared.preview
 
-    if inLiveResize && preview.resizingMode == .none {
-      let screenPoint = NSEvent.mouseLocation
-      let windowPoint = convertPoint(fromScreen: screenPoint)
-      let location: SlideoutPlacement = windowPoint.x <= frame.width / 2 ? .left : .right
-      if (location == preview.placement) && preview.state == .open {
-        preview.startResize(mode: .slideout)
-      } else {
-        preview.startResize(mode: .content)
-      }
+    if inLiveResize {
+      startResizeIfNeeded()
     }
 
     var finalFrameSize = frameSize
@@ -164,17 +196,28 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     }
     finalFrameSize.width = max(finalFrameSize.width, minContent + minPreview)
 
-    if !AppState.shared.preview.state.isAnimating {
-      var size = frame.size
-      // Only store the size of the window without the preview
-      size.width = AppState.shared.preview.contentWidth
-      saveWindowFrame(frame: NSRect(origin: frame.origin, size: size))
-    }
-
     let minimumHeight = AppState.shared.popup.minimumHeight
     finalFrameSize.height = max(finalFrameSize.height, minimumHeight)
 
+    if let visibleFrame = screen?.visibleFrame {
+      finalFrameSize.width = min(finalFrameSize.width, visibleFrame.width)
+      finalFrameSize.height = min(finalFrameSize.height, visibleFrame.height)
+    }
+
     return finalFrameSize
+  }
+
+  private func startResizeIfNeeded() {
+    let preview = AppState.shared.preview
+    guard preview.resizingMode == .none else { return }
+
+    let windowPoint = convertPoint(fromScreen: NSEvent.mouseLocation)
+    let location: SlideoutPlacement = windowPoint.x <= frame.width / 2 ? .left : .right
+    if location == preview.placement && preview.state == .open {
+      preview.startResize(mode: .slideout)
+    } else {
+      preview.startResize(mode: .content)
+    }
   }
 
   func windowWillMove(_ notification: Notification) {
@@ -187,11 +230,20 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
 
   func windowWillStartLiveResize(_ notification: Notification) {
     AppState.shared.preview.cancelAutoOpen()
+    // Release the fixed list/preview width before AppKit proposes a smaller
+    // window size, instead of waiting for the first windowWillResize callback.
+    startResizeIfNeeded()
+    contentView?.layoutSubtreeIfNeeded()
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
-    AppState.shared.preview.startAutoOpen()
-    AppState.shared.preview.endResize()
+    let preview = AppState.shared.preview
+    preview.endResize()
+    var size = frame.size
+    // Save the final list width, excluding the independently sized preview.
+    size.width = preview.contentWidth
+    saveWindowFrame(frame: NSRect(origin: frame.origin, size: size))
+    preview.startAutoOpen()
   }
 
   func windowDidBecomeKey(_ notification: Notification) {

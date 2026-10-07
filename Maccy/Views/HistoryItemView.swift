@@ -23,6 +23,7 @@ struct HistoryItemView: View {
   }
 
   @Default(.showHexColorSwatch) private var showHexColorSwatch
+  @Default(.textPreviewLines) private var textPreviewLines
   @Environment(AppState.self) private var appState
 
   private var colorSwatchImage: NSImage? {
@@ -53,9 +54,10 @@ struct HistoryItemView: View {
       isSelected: item.isSelected,
       selectionIndex: item.multiSelectionIndex,
       selectionAppearance: selectionAppearance,
-      accessibilityLabel: item.accessibilityLabel
+      accessibilityLabel: item.accessibilityLabel,
+      maxTextLines: min(max(textPreviewLines, 1), 20)
     ) {
-      Text(verbatim: item.title)
+      Text(verbatim: item.listText)
     }
     .accessibilityIdentifier("copy-history-item")
     .buttonAction(performSelect)

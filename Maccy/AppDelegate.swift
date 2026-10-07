@@ -4,7 +4,13 @@ import Sparkle
 import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+  #if DEBUG
+  nonisolated static let isPreviewDemo = CommandLine.arguments.contains("preview-demo")
+  nonisolated static let isTesting = CommandLine.arguments.contains("enable-testing") || isPreviewDemo
+  #else
+  nonisolated static let isPreviewDemo = false
   nonisolated static let isTesting = CommandLine.arguments.contains("enable-testing")
+  #endif
   var panel: FloatingPanel<ContentView>!
 
   @objc
@@ -38,25 +44,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationWillFinishLaunching(_ notification: Notification) { // swiftlint:disable:this function_body_length
     #if DEBUG
     if Self.isTesting {
-      SPUUpdater(hostBundle: Bundle.main,
-                 applicationBundle: Bundle.main,
-                 userDriver: SPUStandardUserDriver(hostBundle: Bundle.main, delegate: nil),
-                 delegate: nil)
-      .automaticallyChecksForUpdates = false
+      if !Self.isPreviewDemo {
+        SPUUpdater(hostBundle: Bundle.main,
+                   applicationBundle: Bundle.main,
+                   userDriver: SPUStandardUserDriver(hostBundle: Bundle.main, delegate: nil),
+                   delegate: nil)
+        .automaticallyChecksForUpdates = false
+      }
       // Start from a clean slate for the isolated testing preferences.
       UserDefaults.standard.removePersistentDomain(forName: Defaults.Keys.testingSuiteName)
+    }
+    if Self.isPreviewDemo {
+      configurePreviewDemoPreferences()
     }
     #endif
 
     // Bridge FloatingPanel via AppDelegate.
     AppState.shared.appDelegate = self
 
-    Clipboard.shared.onNewCopy { History.shared.add($0) }
-    Clipboard.shared.start()
+    if !Self.isPreviewDemo {
+      Clipboard.shared.onNewCopy { History.shared.add($0) }
+      Clipboard.shared.start()
 
-    Task {
-      for await _ in Defaults.updates(.clipboardCheckInterval, initial: false) {
-        Clipboard.shared.restart()
+      Task {
+        for await _ in Defaults.updates(.clipboardCheckInterval, initial: false) {
+          Clipboard.shared.restart()
+        }
       }
     }
 
@@ -107,7 +120,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ aNotification: Notification) {
-    migrateUserDefaults()
+    if !Self.isPreviewDemo {
+      migrateUserDefaults()
+    }
+    #if DEBUG
+    if Self.isPreviewDemo {
+      seedPreviewDemoHistory()
+    }
+    #endif
     disableUnusedGlobalHotkeys()
 
     panel = FloatingPanel(
@@ -118,7 +138,72 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     ) {
       ContentView()
     }
+
+    #if DEBUG
+    if Self.isPreviewDemo {
+      DispatchQueue.main.async { [weak self] in
+        NSApp.activate(ignoringOtherApps: true)
+        self?.panel.open(height: AppState.shared.popup.height, at: .center)
+      }
+    }
+    #endif
   }
+
+  #if DEBUG
+  private func configurePreviewDemoPreferences() {
+    Defaults[.textPreviewLines] = 5
+    Defaults[.windowSize] = NSSize(width: 640, height: 700)
+    Defaults[.popupPosition] = .center
+    Defaults[.openPreviewAutomatically] = false
+    Defaults[.showApplicationIcons] = true
+    Defaults[.showSpecialSymbols] = false
+    Defaults[.clearOnQuit] = false
+    Defaults[.clearSystemClipboard] = false
+    Defaults[.sortBy] = .lastCopiedAt
+  }
+
+  private func seedPreviewDemoHistory() {
+    let samples: [(text: String, application: String)] = [
+      ("짧은 메모는 한 줄만 표시합니다.", "com.apple.TextEdit"),
+      ("첫 번째 줄: 원래 줄바꿈을 유지합니다.\n두 번째 줄: 내용만큼 높이가 늘어납니다.\n세 번째 줄: 여백을 낭비하지 않습니다.",
+       "com.apple.TextEdit"),
+      (String(repeating: "창을 좁히면 글이 자동으로 다음 줄로 이어지고, 넓히면 한 줄에 더 많은 내용을 보여줍니다. "
+              + "긴 클립보드 항목도 설정한 최대 다섯 줄까지만 표시하므로 목록을 빠르게 훑어볼 수 있습니다. ", count: 5),
+       "com.apple.TextEdit"),
+      ("https://example.com/clipboard/preview/"
+        + String(repeating: "a-very-long-address-without-any-spaces-", count: 7)
+        + "?layout=automatic&maxLines=5", "com.apple.Safari"),
+      ("""
+      struct ClipboardPreview {
+          let maximumLines = 5
+
+          func display(_ text: String) {
+              // Preserve indentation and line breaks.
+              print(text)
+          }
+      }
+      """, "com.apple.TextEdit")
+    ]
+    let context = Storage.shared.context
+    let timestamp = Date(timeIntervalSince1970: 1_780_000_000)
+    for (index, sample) in samples.enumerated() {
+      let content = HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue,
+                                       value: Data(sample.text.utf8))
+      let item = HistoryItem(contents: [content])
+      context.insert(item)
+      item.application = sample.application
+      item.firstCopiedAt = timestamp.addingTimeInterval(-Double(index))
+      item.lastCopiedAt = item.firstCopiedAt
+      item.title = item.generateTitle()
+    }
+    context.processPendingChanges()
+    do {
+      try context.save()
+    } catch {
+      assertionFailure("Cannot prepare preview demo: \(error.localizedDescription)")
+    }
+  }
+  #endif
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
     panel.toggle(height: AppState.shared.popup.height)

@@ -5,11 +5,15 @@ import Defaults
 @MainActor
 class SearchTests: XCTestCase {
   let savedSearchMode = Defaults[.searchMode]
+  let savedShowSpecialSymbols = Defaults[.showSpecialSymbols]
+  let savedHighlightMatch = Defaults[.highlightMatch]
   var items: [Search.Searchable]!
 
   override func tearDown() {
     super.tearDown()
     Defaults[.searchMode] = savedSearchMode
+    Defaults[.showSpecialSymbols] = savedShowSpecialSymbols
+    Defaults[.highlightMatch] = savedHighlightMatch
   }
 
   func testSimpleSearch() { // swiftlint:disable:this function_body_length
@@ -231,15 +235,84 @@ class SearchTests: XCTestCase {
     XCTAssertEqual(search("m"), [])
   }
 
+  func testSearchHighlightsUnicodeOnSecondLine() throws {
+    Defaults[.searchMode] = .exact
+    Defaults[.showSpecialSymbols] = true
+    Defaults[.highlightMatch] = .bold
+    let source = "👨‍👩‍👧‍👦 첫째\r\n\u{FFFC}둘째 café 검색"
+    let item = HistoryItemDecorator(historyItemWithTitle(source))
+    items = [item]
+
+    let result = try XCTUnwrap(search("café 검색").first)
+    XCTAssertEqual(result.ranges.count, 1)
+    let match = try XCTUnwrap(result.ranges.first)
+    XCTAssertEqual(String(item.listText[match]), "café 검색")
+    item.highlight("café 검색", result.ranges)
+
+    var expected = AttributedString("👨‍👩‍👧‍👦 첫째\n둘째 café 검색")
+    expected[try XCTUnwrap(expected.range(of: "café 검색"))].font = .bold(.body)()
+    XCTAssertEqual(item.attributedTitle, expected)
+    XCTAssertEqual(item.item.text, source)
+  }
+
+  func testExactAndRegexpSearchMatchPreservedNewlines() throws {
+    Defaults[.showSpecialSymbols] = true
+    let item = HistoryItemDecorator(historyItemWithTitle("first\nsecond"))
+    items = [item]
+
+    for mode in [Search.Mode.exact, .regexp, .mixed] {
+      Defaults[.searchMode] = mode
+      let result = try XCTUnwrap(search("first\nsecond").first, "Mode: \(mode)")
+      let match = try XCTUnwrap(result.ranges.first)
+      XCTAssertEqual(String(item.listText[match]), "first\nsecond")
+    }
+  }
+
+  func testFuzzySearchRangesUseMultilineListText() throws {
+    Defaults[.searchMode] = .fuzzy
+    Defaults[.showSpecialSymbols] = true
+    let item = HistoryItemDecorator(historyItemWithTitle("first\nsecond"))
+    items = [item]
+
+    let result = try XCTUnwrap(search("second").first)
+    XCTAssertFalse(result.ranges.isEmpty)
+    XCTAssertTrue(result.ranges.contains { String(item.listText[$0]) == "second" })
+  }
+
+  func testSearchIncludesTextBeyondGeneratedTitleLimit() throws {
+    Defaults[.searchMode] = .exact
+    let source = String(repeating: "a", count: 1_100) + "\nUnique needle"
+    let item = HistoryItemDecorator(historyItemWithTitle(source))
+    items = [item]
+
+    XCTAssertFalse(item.title.contains("Unique needle"))
+    let result = try XCTUnwrap(search("Unique needle").first)
+    let match = try XCTUnwrap(result.ranges.first)
+    XCTAssertEqual(String(item.listText[match]), "Unique needle")
+  }
+
+  func testSearchMatchesDisplayedCustomAlias() throws {
+    Defaults[.searchMode] = .exact
+    let historyItem = historyItemWithTitle("Copied text\nSecond line")
+    historyItem.title = "Personal alias"
+    let item = HistoryItemDecorator(historyItem)
+    items = [item]
+
+    let result = try XCTUnwrap(search("Personal").first)
+    let match = try XCTUnwrap(result.ranges.first)
+    XCTAssertEqual(String(item.listText[match]), "Personal")
+    XCTAssertEqual(search("Second line"), [])
+  }
+
   private func search(_ string: String) -> [Search.SearchResult] {
     return Search().search(string: string, within: items)
   }
 
   // swiftlint:disable:next identifier_name
   private func range(from: Int, to: Int, in item: HistoryItemDecorator) -> Range<String.Index> {
-    let startIndex = item.title.startIndex
-    let lowerBound = item.title.index(startIndex, offsetBy: from)
-    let upperBound = item.title.index(startIndex, offsetBy: to + 1)
+    let startIndex = item.listText.startIndex
+    let lowerBound = item.listText.index(startIndex, offsetBy: from)
+    let upperBound = item.listText.index(startIndex, offsetBy: to + 1)
 
     return lowerBound..<upperBound
   }

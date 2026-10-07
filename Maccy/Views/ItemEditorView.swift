@@ -203,7 +203,14 @@ struct ItemEditorView: View {
     guard editableContent.hasChanges,
           let data = editableContent.text.data(using: .utf8) else { return }
 
+    Self.updateTextContent(of: item, to: data)
+  }
+
+  static func updateTextContent(of item: HistoryItemDecorator, to data: Data) {
     let historyItem = item.item
+    // Classify the existing title before changing the content. Otherwise its
+    // old generated value would look like a custom alias after the edit.
+    let hasGeneratedTitle = historyItem.title == historyItem.generateTitle()
     let stringType = NSPasteboard.PasteboardType.string.rawValue
     historyItem.contents.removeAll { $0.type != stringType }
 
@@ -215,6 +222,12 @@ struct ItemEditorView: View {
       historyItem.contents.append(
         HistoryItemContent(type: stringType, value: data)
       )
+    }
+
+    if hasGeneratedTitle {
+      let title = historyItem.generateTitle()
+      historyItem.title = title
+      item.title = title
     }
   }
 

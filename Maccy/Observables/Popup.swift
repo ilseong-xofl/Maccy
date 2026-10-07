@@ -45,8 +45,9 @@ class Popup {
   var footerHeight: CGFloat = 0
 
   var minimumHeight: CGFloat {
-    // Reserve space for 3 items
-    return suitableHeight(for: 3 * Popup.itemHeight)
+    // Reserve space for 3 items and keep enough height for a preview without
+    // changing the user's window height when the preview opens.
+    return max(Self.minimumPreviewHeight, suitableHeight(for: 3 * Popup.itemHeight))
   }
 
   private var eventsMonitor: Any?
@@ -94,19 +95,10 @@ class Popup {
     AppState.shared.appDelegate?.panel.isPresented != true
   }
 
-  func preferredHeight(for newHeight: CGFloat) -> CGFloat {
-    var height = newHeight
-
-    var minHeight = self.minimumHeight
-    // If the preview is non-empty make sure the window accomodates for it to be visible.
-    if AppState.shared.preview.state.isOpen && AppState.shared.navigator.leadSelection != nil {
-      minHeight = max(minHeight, Self.minimumPreviewHeight)
-    }
-    minHeight = max(headerHeight + Self.verticalPadding, minHeight)
-
-    height = max(height, minHeight)
-    height = min(height, Defaults[.windowSize].height)
-    return height
+  func preferredHeight(for _: CGFloat) -> CGFloat {
+    let height = max(Defaults[.windowSize].height, minimumHeight)
+    let screen = AppState.shared.appDelegate?.panel.screen ?? NSScreen.forPopup
+    return min(height, screen?.visibleFrame.height ?? .infinity)
   }
 
   private func suitableHeight(for historyListHeight: CGFloat) -> CGFloat {
@@ -115,7 +107,6 @@ class Popup {
 
   func resize(height: CGFloat) {
     self.height = suitableHeight(for: height)
-    AppState.shared.appDelegate?.panel.verticallyResize(to: preferredHeight(for: self.height))
     needsResize = false
   }
 

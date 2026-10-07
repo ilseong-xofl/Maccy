@@ -11,7 +11,7 @@ struct AdvancedSettingsPane: View {
         .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(.gray)
         .controlSize(.small)
-      Text("TurnOffShellScript", tableName: "AdvancedSettings")
+      Text(shellScript("TurnOffShellScript"))
         .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(.gray)
         .font(.system(size: 11, design: .monospaced))
@@ -21,7 +21,7 @@ struct AdvancedSettingsPane: View {
         .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(.gray)
         .controlSize(.small)
-      Text("TurnOffNextShellScript", tableName: "AdvancedSettings")
+      Text(shellScript("TurnOffNextShellScript"))
         .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(.gray)
         .font(.system(size: 11, design: .monospaced))
@@ -40,6 +40,14 @@ struct AdvancedSettingsPane: View {
     }
     .frame(minWidth: 350, maxWidth: 450)
     .padding()
+  }
+
+  private func shellScript(_ key: String) -> String {
+    NSLocalizedString(key, tableName: "AdvancedSettings", comment: "")
+      .replacingOccurrences(
+        of: "org.p0deje.Maccy",
+        with: Bundle.main.bundleIdentifier ?? "io.github.ilseong-xofl.MaccyPreview"
+      )
   }
 }
 
