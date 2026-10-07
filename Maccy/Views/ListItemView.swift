@@ -56,7 +56,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   @Environment(AppState.self) private var appState
   @Environment(ModifierFlags.self) private var modifierFlags
 
-  private let accessoryEdgePadding: CGFloat = 10
+  private let accessoryEdgePadding: CGFloat = 6
   private let accessoryContentSpacing: CGFloat = 10
 
   // Use the same selection number for the visible badge and accessibility value.
