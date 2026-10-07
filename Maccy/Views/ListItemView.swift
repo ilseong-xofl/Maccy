@@ -5,6 +5,55 @@ enum FavoriteAppearance {
   static let color = Color(red: 0.95, green: 0.68, blue: 0.18)
 }
 
+struct FavoriteStarIcon: View {
+  var isFilled: Bool
+
+  var body: some View {
+    Group {
+      if isFilled {
+        RoundedFavoriteStar().fill()
+      } else {
+        RoundedFavoriteStar().stroke(style: StrokeStyle(lineWidth: 1.15, lineJoin: .round))
+      }
+    }
+    .padding(0.75)
+    .accessibilityHidden(true)
+  }
+}
+
+private struct RoundedFavoriteStar: Shape {
+  nonisolated func path(in rect: CGRect) -> Path {
+    let vertices: [CGPoint] = [
+      CGPoint(x: 0.50, y: 0.02), CGPoint(x: 0.65, y: 0.32),
+      CGPoint(x: 0.98, y: 0.37), CGPoint(x: 0.74, y: 0.61),
+      CGPoint(x: 0.79, y: 0.95), CGPoint(x: 0.50, y: 0.79),
+      CGPoint(x: 0.21, y: 0.95), CGPoint(x: 0.26, y: 0.61),
+      CGPoint(x: 0.02, y: 0.37), CGPoint(x: 0.35, y: 0.32)
+    ].map { CGPoint(x: rect.minX + $0.x * rect.width, y: rect.minY + $0.y * rect.height) }
+
+    var path = Path()
+    for index in vertices.indices {
+      let vertex = vertices[index]
+      let previous = vertices[(index + vertices.count - 1) % vertices.count]
+      let next = vertices[(index + 1) % vertices.count]
+      // Round both the tips and the inner notches; a round stroke alone leaves filled tips sharp.
+      let rounding: CGFloat = index.isMultiple(of: 2) ? 0.22 : 0.16
+      let entry = CGPoint(x: vertex.x + (previous.x - vertex.x) * rounding,
+                          y: vertex.y + (previous.y - vertex.y) * rounding)
+      let exit = CGPoint(x: vertex.x + (next.x - vertex.x) * rounding,
+                         y: vertex.y + (next.y - vertex.y) * rounding)
+      if index == 0 {
+        path.move(to: entry)
+      } else {
+        path.addLine(to: entry)
+      }
+      path.addQuadCurve(to: exit, control: vertex)
+    }
+    path.closeSubpath()
+    return path
+  }
+}
+
 enum SelectionAppearance {
   case none
   case topConnection
@@ -72,8 +121,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   var body: some View {
     HStack(spacing: 0) {
       if let isFavorite {
-        Image(systemName: isFavorite ? "star.fill" : "star")
-          .font(.system(size: 14, weight: .medium))
+        FavoriteStarIcon(isFilled: isFavorite)
           .foregroundStyle(isFavorite ? FavoriteAppearance.color : Color.secondary)
           .frame(width: 15, height: 15)
           .padding(.leading, accessoryEdgePadding)

@@ -114,9 +114,15 @@ struct HistoryListView: View {
       if pinnedItems.isEmpty && unpinnedItems.isEmpty
           && (appState.history.filter == .favorites || !searchQuery.isEmpty) {
         VStack(spacing: 8) {
-          Image(systemName: searchQuery.isEmpty ? "star" : "magnifyingglass")
-            .font(.system(size: 24))
-            .foregroundStyle(searchQuery.isEmpty ? FavoriteAppearance.color : Color.secondary)
+          if searchQuery.isEmpty {
+            FavoriteStarIcon(isFilled: false)
+              .frame(width: 24, height: 24)
+              .foregroundStyle(FavoriteAppearance.color)
+          } else {
+            Image(systemName: "magnifyingglass")
+              .font(.system(size: 24))
+              .foregroundStyle(.secondary)
+          }
           Text(searchQuery.isEmpty ? "favorites_empty" : "history_search_empty")
             .font(.system(size: 13, weight: .medium))
           if searchQuery.isEmpty {

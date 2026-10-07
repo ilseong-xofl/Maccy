@@ -64,7 +64,13 @@ struct FooterView: View {
       Label {
         Text(title).foregroundStyle(Color.primary.opacity(0.85))
       } icon: {
-        Image(systemName: symbol).foregroundStyle(tint)
+        if filter == .favorites {
+          FavoriteStarIcon(isFilled: true)
+            .foregroundStyle(tint)
+            .frame(width: 12, height: 12)
+        } else {
+          Image(systemName: symbol).foregroundStyle(tint)
+        }
       }
         .font(.system(size: 11, weight: .medium))
         .padding(.horizontal, 9)
