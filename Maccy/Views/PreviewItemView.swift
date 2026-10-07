@@ -84,8 +84,8 @@ struct PreviewItemView: View {
       guard !Task.isCancelled else { return }
       loadedPage = LoadedPage(request: request, page: page)
     }
-    .task(id: linkURL) {
-      await linkState.load(url: linkURL)
+    .task(id: LinkPreviewState.Request(itemID: item.id, url: linkURL)) {
+      await linkState.load(item: item.item, url: linkURL)
     }
     .onChange(of: presentationID) { _, _ in isImageHovered = false }
     .onDisappear {

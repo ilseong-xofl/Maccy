@@ -18,6 +18,18 @@
       {
         "key" : "CI",
         "value" : "$(CI)"
+      },
+      {
+        "key" : "MACCY_MIGRATION_STORE",
+        "value" : "$(MACCY_MIGRATION_STORE)"
+      },
+      {
+        "key" : "MACCY_MIGRATION_EXPECTED_ITEMS",
+        "value" : "$(MACCY_MIGRATION_EXPECTED_ITEMS)"
+      },
+      {
+        "key" : "MACCY_MIGRATION_EXPECTED_CONTENTS",
+        "value" : "$(MACCY_MIGRATION_EXPECTED_CONTENTS)"
       }
     ],
     "targetForVariableExpansion" : {

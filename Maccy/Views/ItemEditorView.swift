@@ -208,6 +208,7 @@ struct ItemEditorView: View {
 
   static func updateTextContent(of item: HistoryItemDecorator, to data: Data) {
     let historyItem = item.item
+    let previousLinkURL = historyItem.linkPreviewSourceURL
     // Classify the existing title before changing the content. Otherwise its
     // old generated value would look like a custom alias after the edit.
     let hasGeneratedTitle = historyItem.title == historyItem.generateTitle()
@@ -228,6 +229,9 @@ struct ItemEditorView: View {
       let title = historyItem.generateTitle()
       historyItem.title = title
       item.title = title
+    }
+    if historyItem.linkPreviewSourceURL != previousLinkURL {
+      History.invalidateLinkPreview(of: historyItem, sourceURL: previousLinkURL)
     }
   }
 

@@ -16,34 +16,38 @@ extension LinkPreviewFailure {
 @MainActor
 @Observable
 final class LinkPreviewState {
-  private(set) var url: URL?
-  private(set) var result: LinkPreviewResult?
-
-  private var currentResult: LinkPreviewResult? {
-    guard let url else { return nil }
-    return LinkPreviewLoader.shared.cachedResult(for: url) ?? result
+  struct Request: Equatable {
+    let itemID: UUID
+    let url: URL?
   }
 
+  private(set) var url: URL?
+  private(set) var result: LinkPreviewResult?
+  private var loadID = UUID()
+
   func preview(for url: URL?) -> ClipboardLinkPreview? {
-    guard self.url == url, case .preview(let preview) = currentResult else { return nil }
+    guard self.url == url, case .preview(let preview) = result else { return nil }
     return preview
   }
 
   func failure(for url: URL?) -> LinkPreviewFailure? {
-    guard self.url == url, case .failure(let failure) = currentResult else { return nil }
+    guard self.url == url, case .failure(let failure) = result else { return nil }
     return failure
   }
 
-  func load(url: URL?) async {
-    if self.url != url { result = nil }
+  func load(item: HistoryItem, url: URL?) async {
+    let loadID = UUID()
+    self.loadID = loadID
+    result = nil
     self.url = url
     guard let url else { clear(); return }
-    let result = await LinkPreviewLoader.shared.result(for: url)
-    guard !Task.isCancelled, self.url == url else { return }
+    let result = await LinkPreviewLoader.shared.result(for: item, url: url)
+    guard !Task.isCancelled, self.loadID == loadID else { return }
     self.result = result
   }
 
   func clear() {
+    loadID = UUID()
     url = nil
     result = nil
   }

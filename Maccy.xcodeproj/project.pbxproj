@@ -7,8 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B174F00638DA4144A98B0306 /* LinkPreviewSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B174F00638DA4144A98B0305 /* LinkPreviewSnapshotTests.swift */; };
 		B174F00538DA4144A98B0206 /* LinkPreviewLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B174F00538DA4144A98B0205 /* LinkPreviewLoaderTests.swift */; };
 		B174F00538DA4144A98B0204 /* LinkPreviewCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B174F00538DA4144A98B0203 /* LinkPreviewCardView.swift */; };
+		B174F00638DA4144A98B0302 /* LinkPreviewSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B174F00638DA4144A98B0301 /* LinkPreviewSnapshot.swift */; };
 		B174F00538DA4144A98B0202 /* LinkPreviewLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B174F00538DA4144A98B0201 /* LinkPreviewLoader.swift */; };
 		B174F00538DA4144A98B0102 /* DetachedPreviewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B174F00538DA4144A98B0101 /* DetachedPreviewController.swift */; };
 		0ABDD5122BB47F1E0054963B /* NSWorkspace+ApplicationName.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ABDD5112BB47F1E0054963B /* NSWorkspace+ApplicationName.swift */; };
@@ -186,8 +188,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		B174F00638DA4144A98B0305 /* LinkPreviewSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkPreviewSnapshotTests.swift; sourceTree = "<group>"; };
 		B174F00538DA4144A98B0205 /* LinkPreviewLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkPreviewLoaderTests.swift; sourceTree = "<group>"; };
 		B174F00538DA4144A98B0203 /* LinkPreviewCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkPreviewCardView.swift; sourceTree = "<group>"; };
+		B174F00638DA4144A98B0301 /* LinkPreviewSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkPreviewSnapshot.swift; sourceTree = "<group>"; };
 		B174F00538DA4144A98B0201 /* LinkPreviewLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkPreviewLoader.swift; sourceTree = "<group>"; };
 		B174F00538DA4144A98B0101 /* DetachedPreviewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetachedPreviewController.swift; sourceTree = "<group>"; };
 		088F4DA628BECBC40003AD19 /* tr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = tr; path = tr.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -779,6 +783,7 @@
 				DAE2850123225BD90080E394 /* ColorImageTests.swift */,
 				DA360DB21E3DF137005C6F6B /* HistoryTests.swift */,
 				DA1EDE422045B35300479723 /* HistoryDecoratorTests.swift */,
+				B174F00638DA4144A98B0305 /* LinkPreviewSnapshotTests.swift */,
 				B174F00538DA4144A98B0205 /* LinkPreviewLoaderTests.swift */,
 				DAFE2DE8268A9B1B00990986 /* HistoryItemTests.swift */,
 				DA384E85232746D800603999 /* SearchTests.swift */,
@@ -875,6 +880,7 @@
 				DAAEB195219694AE00A7883C /* About.swift */,
 				DA6D98E12AEABE03008A77CE /* Accessibility.swift */,
 				DAEE38461E3DBEB100DD2966 /* AppDelegate.swift */,
+				B174F00638DA4144A98B0301 /* LinkPreviewSnapshot.swift */,
 				B174F00538DA4144A98B0201 /* LinkPreviewLoader.swift */,
 				DAB082952A2B7B850053E463 /* AppStoreReview.swift */,
 				2FB5BC9F2CD8F73C008B33F4 /* ApplicationImage.swift */,
@@ -1124,6 +1130,7 @@
 				DAFE2DE9268A9B1B00990986 /* HistoryItemTests.swift in Sources */,
 				DA3CE8001E44A62500B3AA98 /* ClipboardTests.swift in Sources */,
 				DA1EDE432045B35300479723 /* HistoryDecoratorTests.swift in Sources */,
+				B174F00638DA4144A98B0306 /* LinkPreviewSnapshotTests.swift in Sources */,
 				B174F00538DA4144A98B0206 /* LinkPreviewLoaderTests.swift in Sources */,
 				DAE2850223225BD90080E394 /* ColorImageTests.swift in Sources */,
 				DA384E86232746D800603999 /* SearchTests.swift in Sources */,
@@ -1251,6 +1258,7 @@
 				DAC14124232367B200FCFA30 /* Search.swift in Sources */,
 				DA0FFA2A2C8D100C00A66C97 /* ModifierFlags+Description.swift in Sources */,
 				DAEE38471E3DBEB100DD2966 /* AppDelegate.swift in Sources */,
+				B174F00638DA4144A98B0302 /* LinkPreviewSnapshot.swift in Sources */,
 				B174F00538DA4144A98B0202 /* LinkPreviewLoader.swift in Sources */,
 				DAA072DF2C41C63C006DDFD2 /* ConfirmationView.swift in Sources */,
 				DA3BCB8E2C3E015000B01BC1 /* ModifierFlags.swift in Sources */,

@@ -164,6 +164,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     var replacedPinnedItem: HistoryItemDecorator?
     if let existingHistoryItem = findSimilarItem(item) {
+      // Contents move to the new item below, so capture the source and metadata first.
+      let previousLinkURL = existingHistoryItem.linkPreviewSourceURL
+      let previousLinkSnapshot = existingHistoryItem.linkPreviewSnapshot
       if isModified(item) == nil {
         transferContents(from: existingHistoryItem, to: item)
       } else {
@@ -176,6 +179,13 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       if !item.fromMaccy {
         item.application = existingHistoryItem.application
       }
+      if let snapshot = previousLinkSnapshot,
+         let sourceURL = item.linkPreviewSourceURL,
+         LinkPreviewSnapshot.sourceURL(in: snapshot) == sourceURL {
+        item.linkPreviewSnapshot = snapshot
+      } else {
+        item.linkPreviewSnapshot = nil
+      }
       logger.info("Removing duplicate item '\(item.title)'")
       if let existingDecorator = firstStoredItem(where: { $0.item == existingHistoryItem }) {
         cleanup(existingDecorator)
@@ -184,7 +194,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
           replacedPinnedItem = existingDecorator
         }
       }
-      deleteFromStorage(existingHistoryItem)
+      deleteFromStorage(existingHistoryItem, originalLinkURL: previousLinkURL)
     } else {
       Task {
         Notifier.notify(body: item.title, sound: .write)
@@ -216,6 +226,16 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       updateSearchResults()
     }
     AppState.shared.popup.needsResize = true
+    if item.linkPreviewSnapshot != nil {
+      // Commit the snapshot handoff and old-row deletion before add returns.
+      let context = Storage.shared.context
+      context.processPendingChanges()
+      do {
+        try context.save()
+      } catch {
+        logger.error("Failed to save inherited link preview snapshot")
+      }
+    }
     return itemDecorator
   }
 
@@ -235,7 +255,10 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   @MainActor
   func clear() {
     withLogging("Clearing history") {
-      allUnpinnedItems.forEach(cleanup)
+      allUnpinnedItems.forEach { item in
+        Self.invalidateLinkPreview(of: item.item, sourceURL: item.item.linkPreviewSourceURL)
+        cleanup(item)
+      }
       allUnpinnedItems.removeAll()
       filteredUnpinnedItems.removeAll()
       sessionLog.removeValues { $0.pin == nil }
@@ -264,8 +287,14 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   @MainActor
   func clearAll() {
     withLogging("Clearing all history") {
-      allPinnedItems.forEach(cleanup)
-      allUnpinnedItems.forEach(cleanup)
+      allPinnedItems.forEach { item in
+        Self.invalidateLinkPreview(of: item.item, sourceURL: item.item.linkPreviewSourceURL)
+        cleanup(item)
+      }
+      allUnpinnedItems.forEach { item in
+        Self.invalidateLinkPreview(of: item.item, sourceURL: item.item.linkPreviewSourceURL)
+        cleanup(item)
+      }
       allUnpinnedItems.removeAll()
       filteredPinnedItems.removeAll()
       filteredUnpinnedItems.removeAll()
@@ -303,7 +332,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     cleanup(item)
     withLogging("Removing history item") {
-      deleteFromStorage(item.item)
+      deleteFromStorage(item.item, originalLinkURL: item.item.linkPreviewSourceURL)
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
     }
@@ -329,9 +358,20 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   }
 
   @MainActor
-  private func deleteFromStorage(_ item: HistoryItem) {
+  private func deleteFromStorage(_ item: HistoryItem, originalLinkURL: URL?) {
+    Self.invalidateLinkPreview(of: item, sourceURL: originalLinkURL)
     deleteContents(of: item)
     Storage.shared.context.delete(item)
+  }
+
+  @MainActor
+  static func invalidateLinkPreview(of item: HistoryItem, sourceURL: URL?) {
+    let snapshotURL = item.linkPreviewSnapshot.flatMap { LinkPreviewSnapshot.sourceURL(in: $0) }
+    item.linkPreviewGeneration = UUID()
+    item.linkPreviewSnapshot = nil
+    for url in Set([sourceURL, snapshotURL].compactMap({ $0 })) {
+      LinkPreviewLoader.shared.invalidateCachedResult(for: url)
+    }
   }
 
   @MainActor

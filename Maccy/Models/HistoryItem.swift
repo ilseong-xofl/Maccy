@@ -75,6 +75,10 @@ class HistoryItem {
   // SwiftData relationships are unordered. Keep file order and preview access together,
   // without replacing any of the original pasteboard representations.
   var previewImageFiles: Data?
+  // Stored inline with this history row so every history deletion removes its preview too.
+  var linkPreviewSnapshot: Data?
+
+  @Transient var linkPreviewGeneration: UUID = UUID()
 
   @Relationship(deleteRule: .cascade, inverse: \HistoryItemContent.item)
   var contents: [HistoryItemContent] = []
@@ -150,6 +154,12 @@ class HistoryItem {
     } else {
       title
     }
+  }
+
+  @MainActor
+  var linkPreviewSourceURL: URL? {
+    guard fileURLs.isEmpty else { return nil }
+    return LinkPreviewLoader.candidateURL(from: previewableText)
   }
 
   var fileURLs: [URL] {

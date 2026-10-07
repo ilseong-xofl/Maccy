@@ -87,8 +87,8 @@ struct HistoryItemView: View {
     .onAppear {
       item.ensureThumbnailImage()
     }
-    .task(id: linkURL) {
-      await linkState.load(url: linkURL)
+    .task(id: LinkPreviewState.Request(itemID: item.id, url: linkURL)) {
+      await linkState.load(item: item.item, url: linkURL)
     }
     .onDisappear { linkState.clear() }
     .accessibilityAction(named: Text(item.isPinned ? "history_item_unpin_action" : "history_item_pin_action")) {

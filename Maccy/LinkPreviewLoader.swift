@@ -1,7 +1,9 @@
 import AppKit
 import Darwin
 import LinkPresentation
+import Logging
 import Observation
+import SwiftData
 import UniformTypeIdentifiers
 
 @MainActor
@@ -47,8 +49,10 @@ final class LinkPreviewLoader {
     let id = UUID()
     var waiters: [UUID: CheckedContinuation<LinkPreviewResult?, Never>] = [:]
     var task: Task<Void, Never>?
+    var shouldCache = true
   }
 
+  private let logger = Logger(label: "io.github.ilseong-xofl.MaccyPreview.LinkPreview")
   private let capacity: Int
   private let concurrentLimit: Int
   private let failureLifetime: TimeInterval
@@ -84,12 +88,13 @@ final class LinkPreviewLoader {
   /// Local hosts and private IP literals are excluded from automatic network requests.
   nonisolated static func candidateURL(from text: String) -> URL? {
     let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !value.isEmpty,
+    guard !value.isEmpty, value.utf8.count <= 16 * 1_024,
           value.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil,
           let components = URLComponents(string: value),
           let scheme = components.scheme?.lowercased(), ["http", "https"].contains(scheme),
           components.user == nil, components.password == nil,
-          let url = components.url, let host = url.host?.lowercased(), !host.isEmpty,
+          let url = components.url, url.absoluteString.utf8.count <= 16 * 1_024,
+          let host = url.host?.lowercased(), !host.isEmpty,
           components.port.map({ (1...65535).contains($0) }) ?? true,
           isPublicHost(host) else { return nil }
     return url
@@ -99,6 +104,42 @@ final class LinkPreviewLoader {
   func cachedResult(for url: URL) -> LinkPreviewResult? {
     guard let entry = cache[url], entry.expiresAt > now() else { return nil }
     return entry.result
+  }
+
+  /// Discard completed values without interrupting other consumers of a shared request.
+  func invalidateCachedResult(for url: URL) {
+    cache[url] = nil
+    cacheOrder.removeAll { $0 == url }
+    requests[url]?.shouldCache = false
+  }
+
+  /// A clipboard entry keeps its first completed preview, including failures, across app launches.
+  func result(for item: HistoryItem, url: URL) async -> LinkPreviewResult? {
+    guard !Task.isCancelled, let context = item.modelContext, !item.isDeleted,
+          item.linkPreviewSourceURL == url else { return nil }
+    if let snapshot = item.linkPreviewSnapshot {
+      return LinkPreviewSnapshot.decode(snapshot, sourceURL: url) ?? .failure(.unavailable)
+    }
+
+    let generation = item.linkPreviewGeneration
+    guard let result = await result(for: url), !Task.isCancelled,
+          item.modelContext === context, !item.isDeleted,
+          item.linkPreviewGeneration == generation, item.linkPreviewSourceURL == url else { return nil }
+    // Another window may already have stored this same shared load.
+    if let snapshot = item.linkPreviewSnapshot {
+      return LinkPreviewSnapshot.decode(snapshot, sourceURL: url) ?? .failure(.unavailable)
+    }
+    let snapshot = LinkPreviewSnapshot.encode(result, sourceURL: url)
+      ?? LinkPreviewSnapshot.encode(.failure(.unavailable), sourceURL: url)
+    guard let snapshot else { return .failure(.unavailable) }
+    item.linkPreviewSnapshot = snapshot
+    do {
+      try context.save()
+    } catch {
+      // Store errors can contain source URLs; keep the log free of clipboard contents.
+      logger.error("Failed to save a link preview snapshot.")
+    }
+    return LinkPreviewSnapshot.decode(snapshot, sourceURL: url) ?? .failure(.unavailable)
   }
 
   func preview(for url: URL) async -> ClipboardLinkPreview? {
@@ -174,7 +215,7 @@ final class LinkPreviewLoader {
     defer { startQueuedRequests() }
     guard let request = requests[url], request.id == requestID else { return }
     requests[url] = nil
-    if !cancelled, let result {
+    if !cancelled, request.shouldCache, let result {
       let lifetime: TimeInterval
       if case .failure = result { lifetime = failureLifetime } else { lifetime = successLifetime }
       cache[url] = CacheEntry(result: result, expiresAt: now().addingTimeInterval(lifetime))

@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import SwiftData
 import XCTest
 @testable import Maccy
 
@@ -20,6 +21,13 @@ final class LinkPreviewLoaderTests: XCTestCase {
       LinkPreviewLoader.candidateURL(from: values[1])?.absoluteString,
       "https://example.com/path?q=one%20two#section"
     )
+  }
+
+  func testRejectsSourceURLsTooLargeForASnapshotIdentity() {
+    let oversized = "https://example.com/" + String(repeating: "a", count: 16 * 1_024)
+    let oversizedAfterEncoding = "https://example.com/" + String(repeating: "한", count: 2_000)
+    XCTAssertNil(LinkPreviewLoader.candidateURL(from: oversized))
+    XCTAssertNil(LinkPreviewLoader.candidateURL(from: oversizedAfterEncoding))
   }
 
   func testRejectsProseFilesCredentialsAndMultipleLinks() {
@@ -302,6 +310,246 @@ final class LinkPreviewLoaderTests: XCTestCase {
   @MainActor
   private final class ObservationSignal {
     var changed = false
+  }
+
+  func testSavedSuccessAndFailureAreUsedByANewLoaderAndContext() async throws {
+    let url = URL(string: "https://example.com/saved")!
+    for expected in [LinkPreviewResult.preview(ClipboardLinkPreview(url: url, title: "Saved title", image: nil)),
+                     .failure(.notFound), .failure(.unavailable), .failure(.connectionFailure)] {
+      let container = try ModelContainer(for: HistoryItem.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+      let writer = ModelContext(container)
+      let item = try makeHistoryItem(in: writer, url: url)
+      let loader = LinkPreviewLoader(fetch: { _ in expected }, probe: { _ in .status(200) })
+      // notFound can only originate from an observed HTTP status.
+      if case .failure(.notFound) = expected {
+        item.linkPreviewSnapshot = LinkPreviewSnapshot.encode(expected, sourceURL: url)
+        try writer.save()
+      } else {
+        _ = await loader.result(for: item, url: url)
+      }
+      let reader = ModelContext(container)
+      let restored = try XCTUnwrap(reader.model(for: item.persistentModelID) as? HistoryItem)
+      let actual = await offlineLoader().result(for: restored, url: url)
+      assertSameResult(actual, expected)
+      XCTAssertNotNil(restored.linkPreviewSnapshot)
+    }
+  }
+
+  func testSnapshotsSurviveFileBackedStoreReopenWithoutNetwork() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = URL(string: "https://example.com/saved")!
+    let expected: [LinkPreviewResult] = [
+      .preview(ClipboardLinkPreview(url: url, title: "Stored on disk", image: nil)),
+      .failure(.unavailable), .failure(.connectionFailure), .failure(.notFound)
+    ]
+    for (index, result) in expected.enumerated() {
+      let store = directory.appendingPathComponent("preview-\(index).sqlite")
+      try await writeSnapshot(result, url: url, store: store)
+      let reopened = try ModelContainer(for: HistoryItem.self, configurations: ModelConfiguration(url: store))
+      let reader = ModelContext(reopened)
+      let item = try XCTUnwrap(reader.fetch(FetchDescriptor<HistoryItem>()).first)
+      let actual = await offlineLoader().result(for: item, url: url)
+      assertSameResult(actual, result)
+      XCTAssertEqual(item.contents.first?.value, Data(url.absoluteString.utf8))
+    }
+  }
+
+  func testSavedSnapshotsIgnoreMemoryCacheExpiryAndEviction() async throws {
+    let url = URL(string: "https://example.com/saved")!
+    for shouldFail in [false, true] {
+      let container = try ModelContainer(for: HistoryItem.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+      let context = ModelContext(container)
+      let item = try makeHistoryItem(in: context, url: url)
+      var date = Date(timeIntervalSince1970: 1_000)
+      var fetches = 0
+      let loader = LinkPreviewLoader(capacity: 1, failureLifetime: 1, successLifetime: 1, now: { date }, fetch: { url in
+        fetches += 1
+        return shouldFail ? .failure(.unavailable) : .preview(
+          ClipboardLinkPreview(url: url, title: "Initial title", image: nil)
+        )
+      }, probe: { _ in .status(200) })
+      let original = await loader.result(for: item, url: url)
+      _ = await loader.result(for: URL(string: "https://example.com/other")!)
+      date = date.addingTimeInterval(10_000)
+      let restored = await loader.result(for: item, url: url)
+      assertSameResult(restored, try XCTUnwrap(original))
+      XCTAssertEqual(fetches, 2)
+    }
+  }
+
+  func testCorruptSavedSnapshotDoesNotTriggerAnotherRequest() async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let context = ModelContext(container)
+    let url = URL(string: "https://example.com/saved")!
+    let item = try makeHistoryItem(in: context, url: url)
+    item.linkPreviewSnapshot = Data("corrupt snapshot".utf8)
+    try context.save()
+    let result = await offlineLoader().result(for: item, url: url)
+    assertFailure(result, equals: .unavailable)
+  }
+
+  func testDeletedItemDoesNotPersistACompletedRequest() async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let context = ModelContext(container)
+    let url = URL(string: "https://example.com/saved")!
+    let item = try makeHistoryItem(in: context, url: url)
+    let gate = FetchGate()
+    let loader = LinkPreviewLoader(fetch: { await gate.fetch($0) }, probe: { _ in .status(200) })
+    let load = Task { await loader.result(for: item, url: url) }
+    await waitFor { gate.started.count == 1 }
+    context.delete(item)
+    try context.save()
+    gate.complete(url)
+    let result = await load.value
+    XCTAssertNil(result)
+    XCTAssertEqual(try context.fetchCount(FetchDescriptor<HistoryItem>()), 0)
+  }
+
+  func testEditedSourceDoesNotPersistACompletedRequest() async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let context = ModelContext(container)
+    let url = URL(string: "https://example.com/old")!
+    let replacement = URL(string: "https://example.com/new")!
+    let item = try makeHistoryItem(in: context, url: url)
+    let gate = FetchGate()
+    let loader = LinkPreviewLoader(fetch: { await gate.fetch($0) }, probe: { _ in .status(200) })
+    let load = Task { await loader.result(for: item, url: url) }
+    await waitFor { gate.started.count == 1 }
+    // Verify the source guard independently of the explicit generation invalidation.
+    item.contents.first?.value = Data(replacement.absoluteString.utf8)
+    item.title = replacement.absoluteString
+    try context.save()
+    gate.complete(url)
+    let result = await load.value
+    XCTAssertNil(result)
+    XCTAssertNil(item.linkPreviewSnapshot)
+  }
+
+  func testGenerationInvalidationBlocksSaveWithoutCancellingSharedWaiters() async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let context = ModelContext(container)
+    let url = URL(string: "https://example.com/saved")!
+    let item = try makeHistoryItem(in: context, url: url)
+    let gate = FetchGate()
+    let loader = LinkPreviewLoader(fetch: { await gate.fetch($0) }, probe: { _ in .status(200) })
+    let load = Task { await loader.result(for: item, url: url) }
+    await waitFor { gate.started.count == 1 }
+    let shared = Task { await loader.result(for: url) }
+    await Task.yield()
+    item.linkPreviewGeneration = UUID()
+    item.linkPreviewSnapshot = nil
+    loader.invalidateCachedResult(for: url)
+    gate.complete(url)
+    let discarded = await load.value
+    let sharedResult = await shared.value
+    XCTAssertNil(discarded)
+    guard case .preview = sharedResult else { return XCTFail("The shared waiter must still finish") }
+    XCTAssertNil(item.linkPreviewSnapshot)
+    XCTAssertNil(loader.cachedResult(for: url))
+  }
+
+  func testCompletedCacheCanBeInvalidatedWithoutChangingStoredSnapshot() async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let context = ModelContext(container)
+    let url = URL(string: "https://example.com/saved")!
+    let item = try makeHistoryItem(in: context, url: url)
+    let loader = LinkPreviewLoader(fetch: { url in
+      .preview(ClipboardLinkPreview(url: url, title: "Stored", image: nil))
+    }, probe: { _ in .status(200) })
+    _ = await loader.result(for: item, url: url)
+    let snapshot = item.linkPreviewSnapshot
+    XCTAssertNotNil(loader.cachedResult(for: url))
+    loader.invalidateCachedResult(for: url)
+    XCTAssertNil(loader.cachedResult(for: url))
+    XCTAssertEqual(item.linkPreviewSnapshot, snapshot)
+  }
+
+  func testStoredResultMatchesFirstDisplayAndPreservesClipboardRepresentations() async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let context = ModelContext(container)
+    let url = URL(string: "https://example.com/saved")!
+    let item = try makeHistoryItem(in: context, url: url)
+    let html = Data("<a href='https://example.com/saved'>Original formatting</a>".utf8)
+    item.contents.append(HistoryItemContent(type: NSPasteboard.PasteboardType.html.rawValue, value: html))
+    try context.save()
+    let originalContents = Dictionary(uniqueKeysWithValues: item.contents.map { ($0.type, $0.value) })
+    let image = NSImage(size: NSSize(width: 2_400, height: 1_200))
+    image.lockFocus()
+    NSColor.red.setFill()
+    NSRect(origin: .zero, size: image.size).fill()
+    image.unlockFocus()
+    let loader = LinkPreviewLoader(fetch: { url in
+      .preview(ClipboardLinkPreview(url: url, title: "Page title", image: image))
+    }, probe: { _ in .status(200) })
+    let first = await loader.result(for: item, url: url)
+    let stored = try XCTUnwrap(item.linkPreviewSnapshot)
+    let decoded = LinkPreviewSnapshot.decode(stored, sourceURL: url)
+    guard case .preview(let firstPreview) = first, case .preview(let decodedPreview) = decoded else {
+      return XCTFail("Expected both rendered previews")
+    }
+    XCTAssertNotNil(firstPreview.image)
+    XCTAssertEqual(firstPreview.image?.size, decodedPreview.image?.size)
+    XCTAssertEqual(firstPreview.title, decodedPreview.title)
+    XCTAssertEqual(Dictionary(uniqueKeysWithValues: item.contents.map { ($0.type, $0.value) }), originalContents)
+    XCTAssertEqual(item.title, url.absoluteString)
+  }
+
+  private func makeHistoryItem(in context: ModelContext, url: URL) throws -> HistoryItem {
+    let item = HistoryItem(contents: [HistoryItemContent(
+      type: NSPasteboard.PasteboardType.string.rawValue, value: Data(url.absoluteString.utf8)
+    )])
+    item.title = url.absoluteString
+    context.insert(item)
+    try context.save()
+    return item
+  }
+
+  private func offlineLoader() -> LinkPreviewLoader {
+    LinkPreviewLoader(fetch: { _ in
+      XCTFail("A saved preview must never fetch metadata again")
+      return .failure(.unavailable)
+    }, probe: { _ in
+      XCTFail("A saved preview must never probe the URL again")
+      return .unavailable
+    })
+  }
+
+  private func writeSnapshot(_ result: LinkPreviewResult, url: URL, store: URL) async throws {
+    let container = try ModelContainer(for: HistoryItem.self, configurations: ModelConfiguration(url: store))
+    let context = ModelContext(container)
+    let item = try makeHistoryItem(in: context, url: url)
+    let loader = LinkPreviewLoader(fetch: { _ in result }, probe: { _ in
+      if case .failure(.notFound) = result { return .status(404) }
+      return .status(200)
+    })
+    _ = await loader.result(for: item, url: url)
+    // The loader must have saved the model itself; no explicit save here.
+    XCTAssertNotNil(item.linkPreviewSnapshot)
+  }
+
+  private func assertSameResult(
+    _ actual: LinkPreviewResult?, _ expected: LinkPreviewResult,
+    file: StaticString = #filePath, line: UInt = #line
+  ) {
+    switch (actual, expected) {
+    case (.preview(let actual), .preview(let expected)):
+      XCTAssertEqual(actual.url, expected.url, file: file, line: line)
+      XCTAssertEqual(actual.title, expected.title, file: file, line: line)
+    case (.failure(let actual), .failure(let expected)):
+      XCTAssertEqual(actual, expected, file: file, line: line)
+    default:
+      XCTFail("The stored result changed", file: file, line: line)
+    }
   }
 
   private func assertFailure(
