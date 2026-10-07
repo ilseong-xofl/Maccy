@@ -44,9 +44,6 @@ struct ContentView: View {
             .focusEffectDisabled()
             .focused($keyboardFocus, equals: .list)
             .accessibilityIdentifier("clipboard-list-keyboard-focus")
-            .onMouseMove {
-              appState.navigator.isKeyboardNavigating = false
-            }
           }
           .frame(minHeight: 0)
           .layoutPriority(1)

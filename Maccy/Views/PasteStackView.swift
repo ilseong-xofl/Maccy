@@ -98,6 +98,11 @@ struct PasteStackView: View {
         }
       }
     }
-    .hoverSelectionId(stack.id)
+    .clipboardItemInteraction { _ in
+      appState.requestKeyboardFocus(.list)
+      appState.navigator.selectWithoutScrolling(id: stack.id)
+    } onActivate: { flags in
+      appState.history.select(stack.items.first, flags: flags)
+    }
   }
 }

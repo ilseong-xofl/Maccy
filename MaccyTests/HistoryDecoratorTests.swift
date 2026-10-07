@@ -1074,6 +1074,148 @@ class DetachedPreviewSessionSizingTests: XCTestCase {
 }
 
 @MainActor
+class ClipboardItemMouseTests: XCTestCase {
+  private var window: NSWindow!
+  private var mouseView: WindowDragSpy!
+  private var selections: [NSEvent.ModifierFlags] = []
+  private var activations: [NSEvent.ModifierFlags] = []
+
+  override func setUp() {
+    super.setUp()
+    selections = []
+    activations = []
+    window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 300, height: 100),
+      styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    mouseView = WindowDragSpy(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+    mouseView.onSelect = { [weak self] in self?.selections.append($0) }
+    mouseView.onActivate = { [weak self] in self?.activations.append($0) }
+    window.contentView = mouseView
+  }
+
+  override func tearDown() {
+    window.contentView = nil
+    mouseView = nil
+    window = nil
+    super.tearDown()
+  }
+
+  func testSingleClickSelectsWithoutCopying() {
+    mouseView.mouseDown(with: event(.leftMouseDown, flags: .shift))
+    XCTAssertEqual(selections, [.shift])
+    XCTAssertTrue(activations.isEmpty)
+
+    mouseView.mouseUp(with: event(.leftMouseUp, flags: .shift))
+
+    XCTAssertEqual(selections, [.shift])
+    XCTAssertTrue(activations.isEmpty)
+    XCTAssertTrue(mouseView.dragEvents.isEmpty)
+  }
+
+  func testDoubleClickActivatesOnceWithModifiers() {
+    let flags: NSEvent.ModifierFlags = [.option, .shift]
+    mouseView.mouseDown(with: event(.leftMouseDown, flags: flags))
+    mouseView.mouseUp(with: event(.leftMouseUp, flags: flags))
+    mouseView.mouseDown(with: event(.leftMouseDown, clickCount: 2, flags: flags))
+    XCTAssertTrue(activations.isEmpty)
+
+    mouseView.mouseUp(with: event(.leftMouseUp, clickCount: 2, flags: flags))
+
+    XCTAssertEqual(selections, [flags, flags])
+    XCTAssertEqual(activations, [flags])
+    XCTAssertTrue(mouseView.dragEvents.isEmpty)
+  }
+
+  func testDragMovesWindowOnceUsingOriginalMouseDownAndNeverCopies() {
+    let mouseDown = event(.leftMouseDown, clickCount: 2)
+    mouseView.mouseDown(with: mouseDown)
+    mouseView.mouseDragged(with: event(.leftMouseDragged, at: NSPoint(x: 70, y: 50)))
+    mouseView.mouseDragged(with: event(.leftMouseDragged, at: NSPoint(x: 100, y: 50)))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: NSPoint(x: 100, y: 50), clickCount: 2))
+
+    XCTAssertEqual(selections.count, 1)
+    XCTAssertTrue(activations.isEmpty)
+    XCTAssertEqual(mouseView.dragEvents.count, 1)
+    XCTAssertTrue(mouseView.dragEvents.first === mouseDown)
+  }
+
+  func testMinorPointerJitterStillAllowsDoubleClick() {
+    mouseView.mouseDown(with: event(.leftMouseDown, clickCount: 2))
+    mouseView.mouseDragged(with: event(.leftMouseDragged, at: NSPoint(x: 52, y: 51)))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: NSPoint(x: 52, y: 51), clickCount: 2))
+
+    XCTAssertEqual(activations.count, 1)
+    XCTAssertTrue(mouseView.dragEvents.isEmpty)
+  }
+
+  func testReleasingOutsideCancelsActivation() {
+    mouseView.mouseDown(with: event(.leftMouseDown, clickCount: 2))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: NSPoint(x: 350, y: 50), clickCount: 2))
+    // A later mouse-up cannot complete an already cancelled click.
+    mouseView.mouseUp(with: event(.leftMouseUp, clickCount: 2))
+
+    XCTAssertEqual(selections.count, 1)
+    XCTAssertTrue(activations.isEmpty)
+    XCTAssertTrue(mouseView.dragEvents.isEmpty)
+  }
+
+  func testNewClickAfterDragStartsFreshInteraction() {
+    mouseView.mouseDown(with: event(.leftMouseDown))
+    mouseView.mouseDragged(with: event(.leftMouseDragged, at: NSPoint(x: 70, y: 50)))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: NSPoint(x: 70, y: 50)))
+    mouseView.mouseDown(with: event(.leftMouseDown))
+    mouseView.mouseUp(with: event(.leftMouseUp))
+    mouseView.mouseDown(with: event(.leftMouseDown, clickCount: 2))
+    mouseView.mouseUp(with: event(.leftMouseUp, clickCount: 2))
+
+    XCTAssertEqual(selections.count, 3)
+    XCTAssertEqual(activations.count, 1)
+    XCTAssertEqual(mouseView.dragEvents.count, 1)
+  }
+
+  func testMouseUpWithoutMouseDownDoesNotActivate() {
+    mouseView.mouseUp(with: event(.leftMouseUp, clickCount: 2))
+
+    XCTAssertTrue(selections.isEmpty)
+    XCTAssertTrue(activations.isEmpty)
+  }
+
+  func testPointerMovementDoesNotSelectOrActivate() {
+    mouseView.mouseMoved(with: event(.mouseMoved))
+
+    XCTAssertTrue(selections.isEmpty)
+    XCTAssertTrue(activations.isEmpty)
+    XCTAssertTrue(mouseView.dragEvents.isEmpty)
+  }
+
+  func testFirstClickIsHandledAndNativeBackgroundDraggingIsDisabled() {
+    XCTAssertTrue(mouseView.acceptsFirstMouse(for: event(.leftMouseDown)))
+    XCTAssertFalse(mouseView.mouseDownCanMoveWindow)
+  }
+
+  private func event(
+    _ type: NSEvent.EventType,
+    at point: NSPoint = NSPoint(x: 50, y: 50),
+    clickCount: Int = 1,
+    flags: NSEvent.ModifierFlags = []
+  ) -> NSEvent {
+    NSEvent.mouseEvent(
+      with: type, location: point, modifierFlags: flags,
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+      context: nil, eventNumber: 0, clickCount: clickCount, pressure: 1)!
+  }
+
+  private class WindowDragSpy: ClipboardItemMouseView {
+    var dragEvents: [NSEvent] = []
+
+    override func beginWindowDrag(with event: NSEvent) {
+      dragEvents.append(event)
+    }
+  }
+}
+
+@MainActor
 class ExplicitSearchKeyboardTests: XCTestCase {
   func testRepeatedExplicitFocusRequestsAreDelivered() {
     let appState = AppState.shared

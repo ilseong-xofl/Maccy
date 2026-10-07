@@ -10,7 +10,7 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   let onClose: () -> Void
 
   override var isMovable: Bool {
-    get { Defaults[.popupPosition] != .statusItem }
+    get { true }
     set {}
   }
 
@@ -54,10 +54,7 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
 
     let hostingView = NSHostingView(
       rootView: FloatingPanelRootView(
-        content: view(),
-        onWindowDragEnded: { [weak self] in
-          self?.saveWindowPosition()
-        }
+        content: view()
       )
     )
     // Keep native resizing independent of SwiftUI's current layout size.
@@ -180,6 +177,7 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   func windowDidMove(_ notification: Notification) {
+    if isPresented { saveWindowPosition() }
     AppState.shared.preview.reposition()
   }
 
@@ -230,20 +228,11 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
 }
 
 private struct FloatingPanelRootView<Content: View>: View {
-  @State private var appState = AppState.shared
-
   let content: Content
-  let onWindowDragEnded: () -> Void
 
   var body: some View {
     content
       // The safe area is ignored because the title bar still interferes with the geometry
       .ignoresSafeArea()
-      .gesture(
-        DragGesture()
-          .onEnded { _ in
-            onWindowDragEnded()
-          }
-      )
   }
 }

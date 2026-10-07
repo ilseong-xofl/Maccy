@@ -31,14 +31,19 @@ struct HistoryItemView: View {
     return ColorImage.from(item.title)
   }
 
-  private func performSelect() {
-    if NSEvent.modifierFlags.contains(.command) && appState.multiSelectionEnabled {
-      appState.navigator.addToSelection(item: item)
+  private func selectForInteraction(_ flags: NSEvent.ModifierFlags) {
+    appState.requestKeyboardFocus(.list)
+    if flags.contains(.command) && appState.multiSelectionEnabled {
+      if NSApp.currentEvent?.clickCount == 1 { appState.navigator.addToSelection(item: item) }
     } else {
-      let flags = NSEvent.ModifierFlags.currentModifierFlags
-      Task {
-        appState.history.select(item, flags: flags)
-      }
+      appState.navigator.isManualMultiSelect = false
+      appState.navigator.selectWithoutScrolling(item: item)
+    }
+  }
+
+  private func activate(_ flags: NSEvent.ModifierFlags) {
+    Task {
+      appState.history.select(item, flags: flags)
     }
   }
 
@@ -60,7 +65,7 @@ struct HistoryItemView: View {
       Text(verbatim: item.listText)
     }
     .accessibilityIdentifier("copy-history-item")
-    .buttonAction(performSelect)
+    .clipboardItemInteraction(onSelect: selectForInteraction, onActivate: activate)
     .onAppear {
       item.ensureThumbnailImage()
     }

@@ -128,19 +128,78 @@ class MaccyUITests: XCTestCase {
     assertNotExists(items[file1.absoluteString.removingPercentEncoding!])
   }
 
-  func testCopyWithClick() {
+  func testSingleClickSelectsWithoutCopying() {
+    popUpWithMouse()
+    let item = items[copy2].firstMatch
+    scrollIntoViewIfNeeded(item)
+    let pasteboardChangeCount = pasteboard.changeCount
+
+    clickRow(item)
+
+    XCTAssertTrue(item.isSelected)
+    XCTAssertFalse(items[copy1].firstMatch.isSelected)
+    assertExists(app.dialogs.firstMatch)
+    assertPasteboardStringEquals(copy1)
+    XCTAssertEqual(pasteboard.changeCount, pasteboardChangeCount)
+  }
+
+  func testCopyWithDoubleClick() {
     popUpWithMouse()
     scrollIntoViewIfNeeded(items[copy2].firstMatch)
-    items[copy2].firstMatch.click()
+    doubleClickRow(items[copy2].firstMatch)
+    assertPopupDismissed()
     assertPasteboardStringEquals(copy2)
   }
 
   func testCopyWithEnter() {
     popUpWithMouse()
     scrollIntoViewIfNeeded(items[copy2].firstMatch)
-    hover(items[copy2].firstMatch)
+    clickRow(items[copy2].firstMatch)
     app.typeKey(.enter, modifierFlags: [])
     assertPasteboardStringEquals(copy2)
+  }
+
+  func testHoverDoesNotChangeKeyboardSelection() {
+    popUpWithMouse()
+    app.typeKey(.downArrow, modifierFlags: [])
+    XCTAssertTrue(items[copy2].firstMatch.isSelected)
+
+    hover(items[copy1].firstMatch)
+
+    XCTAssertTrue(items[copy2].firstMatch.isSelected)
+    XCTAssertFalse(items[copy1].firstMatch.isSelected)
+    assertExists(app.dialogs.firstMatch)
+    assertPasteboardStringEquals(copy1)
+    app.typeKey(.enter, modifierFlags: [])
+    assertPasteboardStringEquals(copy2)
+  }
+
+  func testDraggingRowMovesWindowWithoutCopying() {
+    popUpWithMouse()
+    let item = items[copy2].firstMatch
+    scrollIntoViewIfNeeded(item)
+    let popup = app.dialogs.firstMatch
+    let initialFrame = popup.frame
+    let pasteboardChangeCount = pasteboard.changeCount
+    let screenMidX = NSScreen.screens.first?.frame.midX ?? initialFrame.midX
+    let deltaX: CGFloat = initialFrame.midX > screenMidX ? -100 : 100
+    let start = item.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+
+    start.click(forDuration: 0.15, thenDragTo: start.withOffset(CGVector(dx: deltaX, dy: 0)))
+
+    expectation(
+      for: NSPredicate { _, _ in
+        abs(popup.frame.minX - initialFrame.minX) > 20
+      },
+      evaluatedWith: popup
+    )
+    waitForExpectations(timeout: 3)
+    assertExists(popup)
+    XCTAssertTrue(item.isSelected)
+    XCTAssertEqual(popup.frame.width, initialFrame.width, accuracy: 1)
+    XCTAssertEqual(popup.frame.height, initialFrame.height, accuracy: 1)
+    assertPasteboardStringEquals(copy1)
+    XCTAssertEqual(pasteboard.changeCount, pasteboardChangeCount)
   }
 
   func testCopyWithCommandShortcut() {
@@ -166,7 +225,7 @@ class MaccyUITests: XCTestCase {
       return
     }
     scrollIntoViewIfNeeded(allItems[1])
-    hoverAndClick(allItems[1])
+    doubleClickRow(allItems[1])
     assertPasteboardDataCountEquals(image2.tiffRepresentation!.count, forType: .tiff)
   }
 
@@ -180,7 +239,7 @@ class MaccyUITests: XCTestCase {
       file2.absoluteString.removingPercentEncoding!
     ])
     scrollIntoViewIfNeeded(items[file2.absoluteString.removingPercentEncoding!].firstMatch)
-    hoverAndClick(items[file2.absoluteString.removingPercentEncoding!].firstMatch)
+    doubleClickRow(items[file2.absoluteString.removingPercentEncoding!].firstMatch)
     assertPasteboardStringEquals(file2.absoluteString, forType: .fileURL)
   }
 
@@ -192,7 +251,7 @@ class MaccyUITests: XCTestCase {
     popUpWithHotkey()
     XCTAssertEqual(Array(itemTitles.prefix(2)), ["foo", "bar"])
     scrollIntoViewIfNeeded(items["bar"].firstMatch)
-    hoverAndClick(items["bar"].firstMatch)
+    doubleClickRow(items["bar"].firstMatch)
     XCTAssertEqual(pasteboard.data(forType: .rtf), rtf2)
   }
 
@@ -202,7 +261,7 @@ class MaccyUITests: XCTestCase {
     popUpWithMouse()
     XCTAssertEqual(Array(itemTitles.prefix(2)), ["foo", "bar"])
     scrollIntoViewIfNeeded(items["bar"].firstMatch)
-    hoverAndClick(items["bar"].firstMatch)
+    doubleClickRow(items["bar"].firstMatch)
     assertPasteboardDataEquals(html2, forType: .html)
   }
 
@@ -693,9 +752,19 @@ class MaccyUITests: XCTestCase {
   }
 
   private func pin(_ title: String) {
-    hover(items[title].firstMatch)
+    clickRow(items[title].firstMatch)
     app.typeKey("p", modifierFlags: [.option])
     usleep(1_500_000)
+  }
+
+  // Coordinates send physical mouse events through the row's native hit surface.
+  // Accessibility activation intentionally still copies without two mouse clicks.
+  private func clickRow(_ element: XCUIElement) {
+    element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+  }
+
+  private func doubleClickRow(_ element: XCUIElement) {
+    element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleClick()
   }
 
   private func hoverAndClick(_ element: XCUIElement) {
