@@ -24,6 +24,7 @@ struct PreviewItemView: View {
   var onLayout: (DetachedPreviewController.ContentMetrics) -> Void = { _ in }
   @State private var metadataHeight: CGFloat = 114
   @State private var loadedPage: LoadedPage?
+  @State private var isImageHovered = false
 
   private var imageRequest: ImageRequest {
     ImageRequest(itemID: item.id, index: imageIndex, presentationID: presentationID)
@@ -75,6 +76,8 @@ struct PreviewItemView: View {
       guard !Task.isCancelled else { return }
       loadedPage = LoadedPage(request: request, page: page)
     }
+    .onChange(of: presentationID) { _, _ in isImageHovered = false }
+    .onDisappear { isImageHovered = false }
   }
 
   @ViewBuilder
@@ -102,6 +105,8 @@ struct PreviewItemView: View {
           carouselControls
         }
       }
+      .contentShape(Rectangle())
+      .onHover { isImageHovered = $0 }
     } else if item.previewText.byteCount >= Self.largeTextThreshold {
       LargeTextView(text: item.previewText.string)
         .padding(8)
@@ -130,6 +135,9 @@ struct PreviewItemView: View {
       }
       .padding(.horizontal, 8)
       .frame(maxHeight: .infinity)
+      .opacity(isImageHovered ? 1 : 0)
+      .allowsHitTesting(isImageHovered)
+      .animation(.easeInOut(duration: 0.12), value: isImageHovered)
 
       Text(verbatim: "\(imageIndex + 1) / \(item.previewImageCount)")
         .font(.system(size: 12, weight: .semibold))
