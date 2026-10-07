@@ -7,6 +7,8 @@
 "clear_all" = "Clear all";
 "about" = "About";
 "quit" = "Quit";
+"quit_alert_message" = "Quit Maccy Preview?";
+"quit_alert_comment" = "Clipboard history collection will stop until you reopen the app.";
 "link_preview_not_found" = "Page not found";
 "link_preview_unavailable" = "Preview unavailable";
 "link_preview_connection_failure" = "Connection failed";

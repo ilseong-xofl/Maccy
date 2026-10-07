@@ -90,11 +90,12 @@ struct ContentView: View {
       }
     }
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
-      guard !appState.isEditingItem else { return }
+      guard !appState.isEditingItem, !appState.isConfirmingQuit else { return }
 
       // AppKit reports resignation before the next key window is established.
       // Treat list + preview as one interaction so preview clicks don't clear search.
       DispatchQueue.main.async {
+        guard !appState.isConfirmingQuit else { return }
         if appState.appDelegate?.panel.isKeyWindow != true && appState.preview.window?.isKeyWindow != true {
           scenePhase = .background
         }

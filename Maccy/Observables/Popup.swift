@@ -111,7 +111,7 @@ class Popup {
   }
 
   private func handleFirstKeyDown() {
-    guard !AppState.shared.isEditingItem else { return }
+    guard !AppState.shared.isEditingItem, !AppState.shared.isConfirmingQuit else { return }
 
     if isClosed() {
       open(height: height)
@@ -125,7 +125,7 @@ class Popup {
   }
 
   private func handleEvent(_ event: NSEvent) -> NSEvent? {
-    guard !AppState.shared.isEditingItem else { return event }
+    guard !AppState.shared.isEditingItem, !AppState.shared.isConfirmingQuit else { return event }
 
     switch event.type {
     case .keyDown:

@@ -11,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   nonisolated static let isTesting = CommandLine.arguments.contains("enable-testing")
   #endif
   var panel: FloatingPanel<ContentView>!
+  private var quitAlert: NSAlert?
 
   @objc
   private lazy var statusItem: NSStatusItem = {
@@ -245,6 +246,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
     panel.toggle(height: AppState.shared.popup.height)
     return true
+  }
+
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    if let quitAlert {
+      quitAlert.window.makeKeyAndOrderFront(nil)
+      return .terminateCancel
+    }
+
+    let state = AppState.shared
+    let previousWindow = sender.keyWindow
+    let alert = NSAlert()
+    alert.messageText = String(localized: "quit_alert_message", defaultValue: "Quit Maccy Preview?")
+    alert.informativeText = String(localized: "quit_alert_comment",
+                                  defaultValue: "Clipboard history collection will stop until you reopen the app.")
+    alert.alertStyle = .warning
+    let cancel = alert.addButton(withTitle: String(localized: "clear_alert_cancel"))
+    alert.addButton(withTitle: String(localized: "quit")).keyEquivalent = ""
+    alert.window.defaultButtonCell = cancel.cell as? NSButtonCell
+    alert.window.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+
+    quitAlert = alert
+    state.isConfirmingQuit = true
+    // The default button owns Return; handle Escape without replacing that equivalent.
+    let escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+      if event.keyCode == 53, sender.modalWindow === alert.window {
+        cancel.performClick(nil)
+        return nil
+      }
+      return event
+    }
+    defer {
+      if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+      quitAlert = nil
+      state.isConfirmingQuit = false
+    }
+    sender.activate(ignoringOtherApps: true)
+    if alert.runModal() == .alertSecondButtonReturn { return .terminateNow }
+
+    if let previousWindow, previousWindow.isVisible {
+      previousWindow.makeKeyAndOrderFront(nil)
+    } else if panel?.isPresented == true {
+      panel.makeKeyAndOrderFront(nil)
+    }
+    return .terminateCancel
   }
 
   func applicationWillTerminate(_ notification: Notification) {
