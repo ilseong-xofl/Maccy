@@ -14,9 +14,10 @@ enum LinkPreviewSnapshot {
     let version: Int
     let sourceURL: String
     let previewURL: String?
-    let title: String?
+    var title: String?
     var thumbnail: Data?
     let failure: String?
+    var youtubeTitleVersion: Int?
   }
 
   static func encode(_ result: LinkPreviewResult, sourceURL: URL) -> Data? {
@@ -29,7 +30,8 @@ enum LinkPreviewSnapshot {
         previewURL: preview.url.absoluteString,
         title: boundedTitle(preview.title),
         thumbnail: preview.image.flatMap(encodeThumbnail),
-        failure: nil
+        failure: nil,
+        youtubeTitleVersion: YouTubeLinkMetadata.canonicalVideoURL(from: sourceURL) == nil ? nil : 1
       )
     case .failure(let failure):
       let status: String
@@ -40,7 +42,7 @@ enum LinkPreviewSnapshot {
       }
       record = Record(
         version: 1, sourceURL: sourceURL.absoluteString,
-        previewURL: nil, title: nil, thumbnail: nil, failure: status
+        previewURL: nil, title: nil, thumbnail: nil, failure: status, youtubeTitleVersion: nil
       )
     }
 
@@ -82,6 +84,33 @@ enum LinkPreviewSnapshot {
   static func sourceURL(in data: Data) -> URL? {
     guard let record = readRecord(data) else { return nil }
     return URL(string: record.sourceURL)
+  }
+
+  /// Existing video cards get one title-specific correction; failures and ordinary links remain unchanged.
+  static func needsYouTubeTitleRepair(_ data: Data, sourceURL: URL) -> Bool {
+    guard YouTubeLinkMetadata.canonicalVideoURL(from: sourceURL) != nil,
+          let record = readRecord(data), (record.youtubeTitleVersion ?? 0) < 1,
+          case .preview = decode(data, sourceURL: sourceURL) else { return false }
+    return true
+  }
+
+  /// A completed lookup is recorded even when it returned no title. Never recompress the saved artwork.
+  static func markYouTubeTitleRepaired(_ data: Data, sourceURL: URL, title: String?) -> Data? {
+    guard needsYouTubeTitleRepair(data, sourceURL: sourceURL), var record = readRecord(data) else { return nil }
+    if let title {
+      let title = boundedTitle(title.trimmingCharacters(in: .whitespacesAndNewlines))
+      if !title.isEmpty { record.title = title }
+    }
+    record.youtubeTitleVersion = 1
+    let encoder = PropertyListEncoder()
+    encoder.outputFormat = .binary
+    while let result = try? encoder.encode(record) {
+      if result.count <= maximumRecordBytes { return result }
+      // Leave thumbnail bytes intact even if a longer replacement title approaches the record limit.
+      guard let title = record.title, !title.isEmpty else { return nil }
+      record.title = String(title.prefix(title.count / 2))
+    }
+    return nil
   }
 
   private static func readRecord(_ data: Data) -> Record? {

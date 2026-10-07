@@ -39,6 +39,13 @@ final class LinkPreviewLoader {
 
   typealias Fetch = @MainActor (URL) async -> LinkPreviewResult?
   typealias Probe = @MainActor (URL) async -> LinkPreviewProbeResult?
+  typealias YouTubeTitle = @MainActor (URL) async -> String?
+
+  private struct RequestKey: Hashable {
+    enum Kind { case preview, youtubeTitleRepair }
+    let url: URL
+    var kind: Kind = .preview
+  }
 
   private struct CacheEntry {
     let result: LinkPreviewResult
@@ -60,10 +67,11 @@ final class LinkPreviewLoader {
   private let now: @MainActor () -> Date
   private let fetch: Fetch
   private let probe: Probe
-  private var cache: [URL: CacheEntry] = [:]
-  private var cacheOrder: [URL] = []
-  private var requests: [URL: Request] = [:]
-  private var queue: [URL] = []
+  private let youtubeTitle: YouTubeTitle
+  private var cache: [RequestKey: CacheEntry] = [:]
+  private var cacheOrder: [RequestKey] = []
+  private var requests: [RequestKey: Request] = [:]
+  private var queue: [RequestKey] = []
   private var activeCount = 0
 
   init(
@@ -73,7 +81,8 @@ final class LinkPreviewLoader {
     successLifetime: TimeInterval = 60 * 60,
     now: @escaping @MainActor () -> Date = { Date() },
     fetch: @escaping Fetch = LinkPreviewLoader.fetchMetadata,
-    probe: @escaping Probe = LinkPreviewLoader.probeURL
+    probe: @escaping Probe = LinkPreviewLoader.probeURL,
+    youtubeTitle: @escaping YouTubeTitle = YouTubeLinkMetadata.title
   ) {
     self.capacity = max(1, capacity)
     self.concurrentLimit = max(1, concurrentLimit)
@@ -82,6 +91,7 @@ final class LinkPreviewLoader {
     self.now = now
     self.fetch = fetch
     self.probe = probe
+    self.youtubeTitle = youtubeTitle
   }
 
   /// Accept a complete web URL, never an address embedded in ordinary clipboard text.
@@ -102,15 +112,18 @@ final class LinkPreviewLoader {
 
   /// Observed by both windows so completed loads stay in sync.
   func cachedResult(for url: URL) -> LinkPreviewResult? {
-    guard let entry = cache[url], entry.expiresAt > now() else { return nil }
+    guard let entry = cache[RequestKey(url: url)], entry.expiresAt > now() else { return nil }
     return entry.result
   }
 
   /// Discard completed values without interrupting other consumers of a shared request.
   func invalidateCachedResult(for url: URL) {
-    cache[url] = nil
-    cacheOrder.removeAll { $0 == url }
-    requests[url]?.shouldCache = false
+    for kind in [RequestKey.Kind.preview, .youtubeTitleRepair] {
+      let key = RequestKey(url: url, kind: kind)
+      cache[key] = nil
+      cacheOrder.removeAll { $0 == key }
+      requests[key]?.shouldCache = false
+    }
   }
 
   /// A clipboard entry keeps its first completed preview, including failures, across app launches.
@@ -118,7 +131,10 @@ final class LinkPreviewLoader {
     guard !Task.isCancelled, let context = item.modelContext, !item.isDeleted,
           item.linkPreviewSourceURL == url else { return nil }
     if let snapshot = item.linkPreviewSnapshot {
-      return LinkPreviewSnapshot.decode(snapshot, sourceURL: url) ?? .failure(.unavailable)
+      guard LinkPreviewSnapshot.needsYouTubeTitleRepair(snapshot, sourceURL: url) else {
+        return LinkPreviewSnapshot.decode(snapshot, sourceURL: url) ?? .failure(.unavailable)
+      }
+      return await repairYouTubeTitle(for: item, url: url, snapshot: snapshot, context: context)
     }
 
     let generation = item.linkPreviewGeneration
@@ -132,6 +148,31 @@ final class LinkPreviewLoader {
     let snapshot = LinkPreviewSnapshot.encode(result, sourceURL: url)
       ?? LinkPreviewSnapshot.encode(.failure(.unavailable), sourceURL: url)
     guard let snapshot else { return .failure(.unavailable) }
+    save(snapshot, for: item, in: context)
+    return LinkPreviewSnapshot.decode(snapshot, sourceURL: url) ?? .failure(.unavailable)
+  }
+
+  private func repairYouTubeTitle(
+    for item: HistoryItem, url: URL, snapshot: Data, context: ModelContext
+  ) async -> LinkPreviewResult? {
+    let generation = item.linkPreviewGeneration
+    guard let lookup = await result(for: RequestKey(url: url, kind: .youtubeTitleRepair)),
+          !Task.isCancelled, item.modelContext === context, !item.isDeleted,
+          item.linkPreviewGeneration == generation, item.linkPreviewSourceURL == url else { return nil }
+    // Another window may have completed this repair while the shared request was running.
+    guard item.linkPreviewSnapshot == snapshot else {
+      return item.linkPreviewSnapshot.flatMap { LinkPreviewSnapshot.decode($0, sourceURL: url) }
+    }
+    let title: String?
+    if case .preview(let preview) = lookup { title = preview.title } else { title = nil }
+    guard let repaired = LinkPreviewSnapshot.markYouTubeTitleRepaired(snapshot, sourceURL: url, title: title) else {
+      return LinkPreviewSnapshot.decode(snapshot, sourceURL: url)
+    }
+    save(repaired, for: item, in: context)
+    return LinkPreviewSnapshot.decode(repaired, sourceURL: url)
+  }
+
+  private func save(_ snapshot: Data, for item: HistoryItem, in context: ModelContext) {
     item.linkPreviewSnapshot = snapshot
     do {
       try context.save()
@@ -139,7 +180,6 @@ final class LinkPreviewLoader {
       // Store errors can contain source URLs; keep the log free of clipboard contents.
       logger.error("Failed to save a link preview snapshot.")
     }
-    return LinkPreviewSnapshot.decode(snapshot, sourceURL: url) ?? .failure(.unavailable)
   }
 
   func preview(for url: URL) async -> ClipboardLinkPreview? {
@@ -148,14 +188,19 @@ final class LinkPreviewLoader {
   }
 
   func result(for url: URL) async -> LinkPreviewResult? {
+    await result(for: RequestKey(url: url))
+  }
+
+  private func result(for key: RequestKey) async -> LinkPreviewResult? {
+    let url = key.url
     guard !Task.isCancelled, Self.candidateURL(from: url.absoluteString) != nil else { return nil }
-    if let entry = cache[url] {
+    if let entry = cache[key] {
       if entry.expiresAt > now() {
-        touch(url)
+        touch(key)
         return entry.result
       }
-      cache[url] = nil
-      cacheOrder.removeAll { $0 == url }
+      cache[key] = nil
+      cacheOrder.removeAll { $0 == key }
     }
 
     let waiterID = UUID()
@@ -165,82 +210,100 @@ final class LinkPreviewLoader {
           continuation.resume(returning: nil)
           return
         }
-        if let request = requests[url] {
+        if let request = requests[key] {
           request.waiters[waiterID] = continuation
         } else {
           let request = Request()
           request.waiters[waiterID] = continuation
-          requests[url] = request
-          queue.append(url)
+          requests[key] = request
+          queue.append(key)
           startQueuedRequests()
         }
       }
     } onCancel: {
-      Task { @MainActor [weak self] in self?.cancelWaiter(waiterID, for: url) }
+      Task { @MainActor [weak self] in self?.cancelWaiter(waiterID, for: key) }
     }
   }
 
   private func startQueuedRequests() {
     while activeCount < concurrentLimit, !queue.isEmpty {
-      let url = queue.removeFirst()
-      guard let request = requests[url] else { continue }
+      let key = queue.removeFirst()
+      let url = key.url
+      guard let request = requests[key] else { continue }
       let requestID = request.id
       activeCount += 1
-      request.task = Task { [weak self, fetch, probe] in
-        let availability = await probe(url)
+      request.task = Task { [weak self, fetch, probe, youtubeTitle] in
         let result: LinkPreviewResult?
-        if Task.isCancelled {
-          result = nil
-        } else if case .status(let status) = availability, status == 404 || status == 410 {
-          result = .failure(.notFound)
-        } else {
-          let metadata = await fetch(url)
-          if case .preview = metadata {
-            result = metadata
-          } else if case .connectionFailure = availability {
-            result = .failure(.connectionFailure)
-          } else if case .failure(.connectionFailure) = metadata {
-            result = metadata
+        switch key.kind {
+        case .youtubeTitleRepair:
+          if let title = await youtubeTitle(url) {
+            result = .preview(ClipboardLinkPreview(url: url, title: title, image: nil))
           } else {
             result = .failure(.unavailable)
           }
+        case .preview:
+          result = await Self.fetchResult(for: url, fetch: fetch, probe: probe, youtubeTitle: youtubeTitle)
         }
-        self?.finish(url, requestID: requestID, result: result, cancelled: Task.isCancelled)
+        self?.finish(key, requestID: requestID, result: result, cancelled: Task.isCancelled)
       }
     }
   }
 
-  private func finish(_ url: URL, requestID: UUID, result: LinkPreviewResult?, cancelled: Bool) {
+  private static func fetchResult(
+    for url: URL, fetch: Fetch, probe: Probe, youtubeTitle: YouTubeTitle
+  ) async -> LinkPreviewResult? {
+    let availability = await probe(url)
+    guard !Task.isCancelled else { return nil }
+    if case .status(let status) = availability, status == 404 || status == 410 {
+      return .failure(.notFound)
+    }
+    // YouTube's LP title can be the channel name. Ask the video-specific endpoint for its title.
+    async let videoTitle = YouTubeLinkMetadata.canonicalVideoURL(from: url) != nil ? youtubeTitle(url) : nil
+    let metadata = await fetch(url)
+    let title = await videoTitle
+    guard !Task.isCancelled else { return nil }
+    if let title {
+      let image: NSImage?
+      if case .preview(let preview) = metadata { image = preview.image } else { image = nil }
+      return .preview(ClipboardLinkPreview(url: url, title: title, image: image))
+    }
+    if case .preview = metadata { return metadata }
+    if case .connectionFailure = availability { return .failure(.connectionFailure) }
+    if case .failure(.connectionFailure) = metadata { return metadata }
+    return .failure(.unavailable)
+  }
+
+  private func finish(_ key: RequestKey, requestID: UUID, result: LinkPreviewResult?, cancelled: Bool) {
     activeCount -= 1
     defer { startQueuedRequests() }
-    guard let request = requests[url], request.id == requestID else { return }
-    requests[url] = nil
+    guard let request = requests[key], request.id == requestID else { return }
+    requests[key] = nil
     if !cancelled, request.shouldCache, let result {
       let lifetime: TimeInterval
       if case .failure = result { lifetime = failureLifetime } else { lifetime = successLifetime }
-      cache[url] = CacheEntry(result: result, expiresAt: now().addingTimeInterval(lifetime))
-      touch(url)
+      cache[key] = CacheEntry(result: result, expiresAt: now().addingTimeInterval(lifetime))
+      touch(key)
       while cacheOrder.count > capacity { cache.removeValue(forKey: cacheOrder.removeFirst()) }
     }
     request.waiters.values.forEach { $0.resume(returning: cancelled ? nil : result) }
   }
 
-  private func cancelWaiter(_ id: UUID, for url: URL) {
-    guard let request = requests[url], let waiter = request.waiters.removeValue(forKey: id) else { return }
+  private func cancelWaiter(_ id: UUID, for key: RequestKey) {
+    guard let request = requests[key], let waiter = request.waiters.removeValue(forKey: id) else { return }
     waiter.resume(returning: nil)
     guard request.waiters.isEmpty else { return }
-    requests[url] = nil
+    requests[key] = nil
     if let task = request.task {
       // Retain its concurrency slot until the underlying provider acknowledges cancellation.
       task.cancel()
     } else {
-      queue.removeAll { $0 == url }
+      queue.removeAll { $0 == key }
     }
   }
 
-  private func touch(_ url: URL) {
-    cacheOrder.removeAll { $0 == url }
-    cacheOrder.append(url)
+  private func touch(_ key: RequestKey) {
+    cacheOrder.removeAll { $0 == key }
+    cacheOrder.append(key)
   }
 
   private static func fetchMetadata(for url: URL) async -> LinkPreviewResult? {

@@ -504,6 +504,324 @@ final class LinkPreviewLoaderTests: XCTestCase {
     XCTAssertEqual(item.title, url.absoluteString)
   }
 
+  func testYouTubeVideoTitleOverridesChannelMetadataAndPreservesURLAndImage() async {
+    let url = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s")!
+    let image = NSImage(size: NSSize(width: 120, height: 80))
+    var titleURLs: [URL] = []
+    let loader = LinkPreviewLoader(fetch: { source in
+      .preview(ClipboardLinkPreview(url: source, title: "Channel name", image: image))
+    }, probe: { _ in .status(200) }, youtubeTitle: { source in
+      titleURLs.append(source)
+      return "Actual video title"
+    })
+
+    let preview = await loader.preview(for: url)
+
+    XCTAssertEqual(preview?.title, "Actual video title")
+    XCTAssertEqual(preview?.url, url)
+    XCTAssertTrue(preview?.image === image)
+    XCTAssertEqual(titleURLs, [url])
+  }
+
+  func testYouTubeTitleAloneSucceedsWhenLinkPresentationFails() async {
+    let url = URL(string: "https://youtu.be/dQw4w9WgXcQ?t=42")!
+    let loader = LinkPreviewLoader(fetch: { _ in .failure(.unavailable) },
+                                  probe: { _ in .connectionFailure },
+                                  youtubeTitle: { _ in "Actual video title" })
+
+    let preview = await loader.preview(for: url)
+
+    XCTAssertEqual(preview?.title, "Actual video title")
+    XCTAssertEqual(preview?.url, url)
+    XCTAssertNil(preview?.image)
+  }
+
+  func testYouTubeNotFoundStatusOverridesAvailableVideoTitle() async {
+    let url = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
+    for status in [404, 410] {
+      let loader = LinkPreviewLoader(fetch: { source in
+        .preview(ClipboardLinkPreview(url: source, title: "Stale metadata", image: nil))
+      }, probe: { _ in .status(status) }, youtubeTitle: { _ in "Stale video title" })
+
+      assertFailure(await loader.result(for: url), equals: .notFound)
+    }
+  }
+
+  func testLegacyYouTubeSnapshotRepairsOnlyTitleAndPersistsWithoutReencodingThumbnail() async throws {
+    let container = try memoryContainer()
+    let writer = ModelContext(container)
+    let url = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s")!
+    let item = try makeHistoryItem(in: writer, url: url)
+    let legacy = try legacyYouTubeSnapshot(url: url)
+    item.linkPreviewSnapshot = legacy
+    try writer.save()
+    let originalThumbnail = try XCTUnwrap(snapshotRecord(legacy)["thumbnail"] as? Data)
+    let originalContents = Dictionary(uniqueKeysWithValues: item.contents.map { ($0.type, $0.value) })
+    var requests = 0
+    let loader = titleRepairLoader { source in
+      XCTAssertEqual(source, url)
+      requests += 1
+      return "Correct video title"
+    }
+
+    let repaired = await loader.result(for: item, url: url)
+    assertSameResult(repaired, .preview(ClipboardLinkPreview(url: url, title: "Correct video title", image: nil)))
+    let saved = try XCTUnwrap(item.linkPreviewSnapshot)
+    let record = try snapshotRecord(saved)
+    XCTAssertEqual(record["thumbnail"] as? Data, originalThumbnail)
+    XCTAssertEqual(record["youtubeTitleVersion"] as? Int, 1)
+    XCTAssertEqual(Dictionary(uniqueKeysWithValues: item.contents.map { ($0.type, $0.value) }), originalContents)
+
+    let reader = ModelContext(container)
+    let restored = try XCTUnwrap(reader.model(for: item.persistentModelID) as? HistoryItem)
+    XCTAssertEqual(restored.linkPreviewSnapshot, saved)
+    let reopened = await offlineLoader().result(for: restored, url: url)
+    assertSameResult(reopened, .preview(ClipboardLinkPreview(url: url, title: "Correct video title", image: nil)))
+    _ = await loader.result(for: item, url: url)
+    XCTAssertEqual(requests, 1)
+  }
+
+  func testUnavailableYouTubeTitleMarksLegacyRepairAttemptAndKeepsOriginalSnapshotContent() async throws {
+    let container = try memoryContainer()
+    let context = ModelContext(container)
+    let url = URL(string: "https://youtu.be/dQw4w9WgXcQ?t=42")!
+    let item = try makeHistoryItem(in: context, url: url)
+    let original = try legacyYouTubeSnapshot(url: url)
+    item.linkPreviewSnapshot = original
+    try context.save()
+    var requests = 0
+    let loader = titleRepairLoader { _ in requests += 1; return nil }
+
+    let result = await loader.result(for: item, url: url)
+    assertSameResult(result, .preview(ClipboardLinkPreview(url: url, title: "Old channel title", image: nil)))
+    let patched = try XCTUnwrap(item.linkPreviewSnapshot)
+    let record = try snapshotRecord(patched)
+    XCTAssertEqual(record["youtubeTitleVersion"] as? Int, 1)
+    XCTAssertEqual(record["thumbnail"] as? Data, try snapshotRecord(original)["thumbnail"] as? Data)
+    _ = await loader.result(for: item, url: url)
+    let reader = ModelContext(container)
+    let restored = try XCTUnwrap(reader.model(for: item.persistentModelID) as? HistoryItem)
+    let reopened = await offlineLoader().result(for: restored, url: url)
+    assertSameResult(reopened, .preview(ClipboardLinkPreview(url: url, title: "Old channel title", image: nil)))
+    XCTAssertEqual(requests, 1)
+  }
+
+  func testTwoWindowsShareLegacyYouTubeTitleRepair() async throws {
+    let container = try memoryContainer()
+    let context = ModelContext(container)
+    let url = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
+    let item = try makeHistoryItem(in: context, url: url)
+    item.linkPreviewSnapshot = try legacyYouTubeSnapshot(url: url)
+    try context.save()
+    let gate = YouTubeTitleGate()
+    let loader = titleRepairLoader { await gate.fetch($0) }
+    let first = Task { await loader.result(for: item, url: url) }
+    let second = Task { await loader.result(for: item, url: url) }
+    await waitFor { gate.started.count == 1 }
+    await Task.yield()
+
+    gate.complete(url, title: "Shared video title")
+    let expected = LinkPreviewResult.preview(ClipboardLinkPreview(url: url, title: "Shared video title", image: nil))
+    assertSameResult(await first.value, expected)
+    assertSameResult(await second.value, expected)
+    XCTAssertEqual(gate.started, [url])
+    XCTAssertEqual(try snapshotRecord(XCTUnwrap(item.linkPreviewSnapshot))["youtubeTitleVersion"] as? Int, 1)
+  }
+
+  func testLegacyTitleRepairAndRegularPreviewShareConcurrencyLimit() async throws {
+    let container = try memoryContainer()
+    let context = ModelContext(container)
+    let videoURL = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
+    let otherURL = URL(string: "https://example.com/queued")!
+    let item = try makeHistoryItem(in: context, url: videoURL)
+    item.linkPreviewSnapshot = try legacyYouTubeSnapshot(url: videoURL)
+    try context.save()
+    let titleGate = YouTubeTitleGate()
+    let metadataGate = FetchGate()
+    let loader = LinkPreviewLoader(concurrentLimit: 1, fetch: { await metadataGate.fetch($0) },
+                                  probe: { _ in .status(200) }, youtubeTitle: { await titleGate.fetch($0) })
+    let repair = Task { await loader.result(for: item, url: videoURL) }
+    await waitFor { titleGate.started.count == 1 }
+    let ordinary = Task { await loader.result(for: otherURL) }
+    for _ in 0..<10 { await Task.yield() }
+    XCTAssertTrue(metadataGate.started.isEmpty)
+
+    titleGate.complete(videoURL, title: "Video title")
+    await waitFor { metadataGate.started.count == 1 }
+    metadataGate.complete(otherURL)
+    _ = await repair.value
+    _ = await ordinary.value
+    XCTAssertEqual(metadataGate.started, [otherURL])
+  }
+
+  func testCancelledLegacyYouTubeRepairLeavesAttemptUnmarked() async throws {
+    let container = try memoryContainer()
+    let context = ModelContext(container)
+    let url = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
+    let item = try makeHistoryItem(in: context, url: url)
+    let original = try legacyYouTubeSnapshot(url: url)
+    item.linkPreviewSnapshot = original
+    try context.save()
+    let gate = YouTubeTitleGate()
+    let loader = titleRepairLoader { await gate.fetch($0) }
+    let load = Task { await loader.result(for: item, url: url) }
+    await waitFor { gate.started.count == 1 }
+
+    load.cancel()
+    let cancelled = await load.value
+    XCTAssertNil(cancelled)
+    gate.complete(url, title: "Too late")
+    await Task.yield()
+    XCTAssertEqual(item.linkPreviewSnapshot, original)
+
+    let retryLoader = titleRepairLoader { _ in "Completed later" }
+    let retry = await retryLoader.result(for: item, url: url)
+    assertSameResult(retry, .preview(ClipboardLinkPreview(url: url, title: "Completed later", image: nil)))
+  }
+
+  func testDeletedItemCannotBeRecreatedByLegacyYouTubeRepair() async throws {
+    let container = try memoryContainer()
+    let context = ModelContext(container)
+    let url = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
+    let item = try makeHistoryItem(in: context, url: url)
+    item.linkPreviewSnapshot = try legacyYouTubeSnapshot(url: url)
+    try context.save()
+    let gate = YouTubeTitleGate()
+    let loader = titleRepairLoader { await gate.fetch($0) }
+    let load = Task { await loader.result(for: item, url: url) }
+    await waitFor { gate.started.count == 1 }
+
+    context.delete(item)
+    try context.save()
+    gate.complete(url, title: "Too late")
+    let result = await load.value
+
+    XCTAssertNil(result)
+    XCTAssertEqual(try context.fetchCount(FetchDescriptor<HistoryItem>()), 0)
+  }
+
+  func testEditedItemCannotBeOverwrittenByLegacyYouTubeRepair() async throws {
+    let container = try memoryContainer()
+    let context = ModelContext(container)
+    let url = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
+    let replacement = URL(string: "https://example.com/new")!
+    let item = try makeHistoryItem(in: context, url: url)
+    item.linkPreviewSnapshot = try legacyYouTubeSnapshot(url: url)
+    try context.save()
+    let gate = YouTubeTitleGate()
+    let loader = titleRepairLoader { await gate.fetch($0) }
+    let load = Task { await loader.result(for: item, url: url) }
+    await waitFor { gate.started.count == 1 }
+    let changedSnapshot = try XCTUnwrap(LinkPreviewSnapshot.encode(.failure(.notFound), sourceURL: replacement))
+    item.contents.first?.value = Data(replacement.absoluteString.utf8)
+    item.title = replacement.absoluteString
+    item.linkPreviewSnapshot = changedSnapshot
+    try context.save()
+
+    gate.complete(url, title: "Too late")
+    let result = await load.value
+
+    XCTAssertNil(result)
+    XCTAssertEqual(item.linkPreviewSnapshot, changedSnapshot)
+    XCTAssertEqual(item.linkPreviewSourceURL, replacement)
+  }
+
+  func testInvalidatedGenerationCannotBeOverwrittenByLegacyYouTubeRepair() async throws {
+    let container = try memoryContainer()
+    let context = ModelContext(container)
+    let url = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
+    let item = try makeHistoryItem(in: context, url: url)
+    let original = try legacyYouTubeSnapshot(url: url)
+    item.linkPreviewSnapshot = original
+    try context.save()
+    let gate = YouTubeTitleGate()
+    let loader = titleRepairLoader { await gate.fetch($0) }
+    let load = Task { await loader.result(for: item, url: url) }
+    await waitFor { gate.started.count == 1 }
+    item.linkPreviewGeneration = UUID()
+
+    gate.complete(url, title: "Too late")
+    let result = await load.value
+
+    XCTAssertNil(result)
+    XCTAssertEqual(item.linkPreviewSnapshot, original)
+  }
+
+  func testOnlyLegacySuccessfulYouTubeVideosTriggerTitleRepair() async throws {
+    let container = try memoryContainer()
+    let context = ModelContext(container)
+    let nonVideoURLs = [
+      "https://www.youtube.com/@example", "https://www.youtube.com/playlist?list=PL123",
+      "https://example.com/video"
+    ]
+    for value in nonVideoURLs {
+      let url = URL(string: value)!
+      let item = try makeHistoryItem(in: context, url: url)
+      item.linkPreviewSnapshot = try legacyYouTubeSnapshot(url: url)
+      let result = await offlineLoader().result(for: item, url: url)
+      assertSameResult(result, .preview(ClipboardLinkPreview(url: url, title: "Old channel title", image: nil)))
+    }
+    let url = URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
+    let item = try makeHistoryItem(in: context, url: url)
+    let correct = LinkPreviewResult.preview(ClipboardLinkPreview(url: url, title: "Already corrected", image: nil))
+    item.linkPreviewSnapshot = LinkPreviewSnapshot.encode(correct, sourceURL: url)
+    let cached = await offlineLoader().result(for: item, url: url)
+    assertSameResult(cached, correct)
+    for failure in [LinkPreviewFailure.notFound, .unavailable, .connectionFailure] {
+      item.linkPreviewSnapshot = LinkPreviewSnapshot.encode(.failure(failure), sourceURL: url)
+      assertFailure(await offlineLoader().result(for: item, url: url), equals: failure)
+    }
+  }
+
+  private func memoryContainer() throws -> ModelContainer {
+    try ModelContainer(for: HistoryItem.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+  }
+
+  private func snapshotRecord(_ data: Data) throws -> [String: Any] {
+    try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
+  }
+
+  private func legacyYouTubeSnapshot(url: URL) throws -> Data {
+    let image = NSImage(size: NSSize(width: 80, height: 40))
+    image.lockFocus()
+    NSColor.blue.setFill()
+    NSRect(origin: .zero, size: image.size).fill()
+    image.unlockFocus()
+    let encoded = try XCTUnwrap(LinkPreviewSnapshot.encode(
+      .preview(ClipboardLinkPreview(url: url, title: "Old channel title", image: image)), sourceURL: url
+    ))
+    var record = try snapshotRecord(encoded)
+    record.removeValue(forKey: "youtubeTitleVersion")
+    return try PropertyListSerialization.data(fromPropertyList: record, format: .binary, options: 0)
+  }
+
+  private func titleRepairLoader(
+    _ title: @escaping @MainActor (URL) async -> String?
+  ) -> LinkPreviewLoader {
+    LinkPreviewLoader(fetch: { _ in
+      XCTFail("Repairing an existing YouTube title must not fetch link metadata")
+      return .failure(.unavailable)
+    }, probe: { _ in
+      XCTFail("Repairing an existing YouTube title must not probe the page")
+      return .unavailable
+    }, youtubeTitle: title)
+  }
+
+  @MainActor
+  private final class YouTubeTitleGate {
+    var started: [URL] = []
+    var pending: [URL: CheckedContinuation<String?, Never>] = [:]
+
+    func fetch(_ url: URL) async -> String? {
+      started.append(url)
+      return await withCheckedContinuation { pending[url] = $0 }
+    }
+
+    func complete(_ url: URL, title: String?) {
+      pending.removeValue(forKey: url)?.resume(returning: title)
+    }
+  }
+
   private func makeHistoryItem(in context: ModelContext, url: URL) throws -> HistoryItem {
     let item = HistoryItem(contents: [HistoryItemContent(
       type: NSPasteboard.PasteboardType.string.rawValue, value: Data(url.absoluteString.utf8)
@@ -521,6 +839,9 @@ final class LinkPreviewLoaderTests: XCTestCase {
     }, probe: { _ in
       XCTFail("A saved preview must never probe the URL again")
       return .unavailable
+    }, youtubeTitle: { _ in
+      XCTFail("A saved preview must not request a YouTube title again")
+      return nil
     })
   }
 

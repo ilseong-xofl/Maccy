@@ -6,6 +6,7 @@ import XCTest
 @MainActor
 final class LinkPreviewSnapshotTests: XCTestCase {
   private let sourceURL = URL(string: "https://example.com/copied")!
+  private let videoURL = URL(string: "https://youtu.be/abcdefghijk?t=42")!
 
   func testRoundTripKeepsCopiedAndResolvedURLsSeparate() throws {
     let resolvedURL = URL(string: "https://example.com/resolved")!
@@ -140,6 +141,93 @@ final class LinkPreviewSnapshotTests: XCTestCase {
     XCTAssertNil(item.linkPreviewSourceURL)
   }
 
+  func testNewYouTubeVideoSuccessIsAlreadyMarked() throws {
+    let data = try XCTUnwrap(LinkPreviewSnapshot.encode(
+      .preview(ClipboardLinkPreview(url: videoURL, title: "Video title", image: nil)), sourceURL: videoURL
+    ))
+    let properties = try snapshotProperties(data)
+    XCTAssertEqual(properties["version"] as? Int, 1)
+    XCTAssertEqual(properties["youtubeTitleVersion"] as? Int, 1)
+    XCTAssertFalse(LinkPreviewSnapshot.needsYouTubeTitleRepair(data, sourceURL: videoURL))
+  }
+
+  func testLegacyYouTubeCorrectionPreservesThumbnailBytesAndURLs() throws {
+    let image = try patternedImage(width: 160, height: 90)
+    let legacy = try legacyYouTubeSnapshot(image: image)
+    XCTAssertTrue(LinkPreviewSnapshot.needsYouTubeTitleRepair(legacy, sourceURL: videoURL))
+    let corrected = try XCTUnwrap(LinkPreviewSnapshot.markYouTubeTitleRepaired(
+      legacy, sourceURL: videoURL, title: "  Actual video title\n"
+    ))
+    let before = try snapshotProperties(legacy)
+    let after = try snapshotProperties(corrected)
+    let thumbnail = try XCTUnwrap(before["thumbnail"] as? Data)
+    XCTAssertEqual(after["thumbnail"] as? Data, thumbnail)
+    XCTAssertEqual(after["sourceURL"] as? String, before["sourceURL"] as? String)
+    XCTAssertEqual(after["previewURL"] as? String, before["previewURL"] as? String)
+    XCTAssertEqual(after["title"] as? String, "Actual video title")
+    XCTAssertEqual(after["youtubeTitleVersion"] as? Int, 1)
+    XCTAssertFalse(LinkPreviewSnapshot.needsYouTubeTitleRepair(corrected, sourceURL: videoURL))
+  }
+
+  func testUnsuccessfulTitleCorrectionKeepsTitleAndMarksCompletedAttempt() throws {
+    let legacy = try legacyYouTubeSnapshot()
+    for title in [nil, " \n\t"] as [String?] {
+      let corrected = try XCTUnwrap(LinkPreviewSnapshot.markYouTubeTitleRepaired(
+        legacy, sourceURL: videoURL, title: title
+      ))
+      let properties = try snapshotProperties(corrected)
+      XCTAssertEqual(properties["title"] as? String, "Legacy channel title")
+      XCTAssertEqual(properties["youtubeTitleVersion"] as? Int, 1)
+      XCTAssertFalse(LinkPreviewSnapshot.needsYouTubeTitleRepair(corrected, sourceURL: videoURL))
+    }
+  }
+
+  func testCorrectedVideoTitleRemainsBounded() throws {
+    let legacy = try legacyYouTubeSnapshot()
+    let corrected = try XCTUnwrap(LinkPreviewSnapshot.markYouTubeTitleRepaired(
+      legacy, sourceURL: videoURL, title: String(repeating: "가", count: 5_000)
+    ))
+    guard case .preview(let preview) = LinkPreviewSnapshot.decode(corrected, sourceURL: videoURL) else {
+      return XCTFail("Expected a corrected preview")
+    }
+    XCTAssertEqual(preview.title.count, LinkPreviewSnapshot.maximumTitleCharacters)
+    XCTAssertLessThanOrEqual(corrected.count, LinkPreviewSnapshot.maximumRecordBytes)
+  }
+
+  func testSavedFailuresAndNonVideoPagesDoNotNeedTitleCorrection() throws {
+    let failure = try XCTUnwrap(LinkPreviewSnapshot.encode(.failure(.notFound), sourceURL: videoURL))
+    let ordinary = try encodedPreview()
+    let channelURL = URL(string: "https://www.youtube.com/@example")!
+    let channel = try XCTUnwrap(LinkPreviewSnapshot.encode(
+      .preview(ClipboardLinkPreview(url: channelURL, title: "Channel", image: nil)), sourceURL: channelURL
+    ))
+    for (data, url) in [(failure, videoURL), (ordinary, sourceURL), (channel, channelURL)] {
+      XCTAssertFalse(LinkPreviewSnapshot.needsYouTubeTitleRepair(data, sourceURL: url))
+      XCTAssertNil(LinkPreviewSnapshot.markYouTubeTitleRepaired(data, sourceURL: url, title: "Unexpected"))
+      XCTAssertNil(try snapshotProperties(data)["youtubeTitleVersion"])
+    }
+  }
+
+  func testFutureTitleCorrectionVersionIsPreserved() throws {
+    var properties = try snapshotProperties(legacyYouTubeSnapshot())
+    properties["youtubeTitleVersion"] = 2
+    let data = try PropertyListSerialization.data(fromPropertyList: properties, format: .binary, options: 0)
+    XCTAssertNotNil(LinkPreviewSnapshot.decode(data, sourceURL: videoURL))
+    XCTAssertFalse(LinkPreviewSnapshot.needsYouTubeTitleRepair(data, sourceURL: videoURL))
+    XCTAssertNil(LinkPreviewSnapshot.markYouTubeTitleRepaired(data, sourceURL: videoURL, title: "Unexpected"))
+  }
+
+  func testOldTitleCorrectionVersionAndInvalidSources() throws {
+    var properties = try snapshotProperties(legacyYouTubeSnapshot())
+    properties["youtubeTitleVersion"] = 0
+    let data = try PropertyListSerialization.data(fromPropertyList: properties, format: .binary, options: 0)
+    XCTAssertTrue(LinkPreviewSnapshot.needsYouTubeTitleRepair(data, sourceURL: videoURL))
+    let otherVideo = URL(string: "https://youtu.be/ABCDEFGHIJK")!
+    XCTAssertFalse(LinkPreviewSnapshot.needsYouTubeTitleRepair(data, sourceURL: otherVideo))
+    XCTAssertNil(LinkPreviewSnapshot.markYouTubeTitleRepaired(data, sourceURL: otherVideo, title: "Unexpected"))
+    XCTAssertFalse(LinkPreviewSnapshot.needsYouTubeTitleRepair(Data([0, 1, 2]), sourceURL: videoURL))
+  }
+
   func testOptionalPrechangeStoreMigratesWithoutLosingHistory() throws {
     let environment = ProcessInfo.processInfo.environment
     guard let fixture = environment["MACCY_MIGRATION_STORE"], !fixture.isEmpty,
@@ -195,6 +283,20 @@ final class LinkPreviewSnapshotTests: XCTestCase {
     try XCTUnwrap(LinkPreviewSnapshot.encode(
       .preview(ClipboardLinkPreview(url: url ?? sourceURL, title: title, image: nil)), sourceURL: sourceURL
     ))
+  }
+
+  private func legacyYouTubeSnapshot(image: NSImage? = nil) throws -> Data {
+    let resolvedURL = URL(string: "https://www.youtube.com/watch?v=abcdefghijk")!
+    let data = try XCTUnwrap(LinkPreviewSnapshot.encode(.preview(ClipboardLinkPreview(
+      url: resolvedURL, title: "Legacy channel title", image: image
+    )), sourceURL: videoURL))
+    var properties = try snapshotProperties(data)
+    properties.removeValue(forKey: "youtubeTitleVersion")
+    return try PropertyListSerialization.data(fromPropertyList: properties, format: .binary, options: 0)
+  }
+
+  private func snapshotProperties(_ data: Data) throws -> [String: Any] {
+    try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
   }
 
   private func modifiedRecord(_ modify: (inout [String: Any]) -> Void) throws -> Data {

@@ -38,7 +38,10 @@ final class LinkPreviewState {
   func load(item: HistoryItem, url: URL?) async {
     let loadID = UUID()
     self.loadID = loadID
-    result = nil
+    // Keep saved artwork visible while an older YouTube card gets its one-time title correction.
+    result = url.flatMap { url in
+      item.linkPreviewSnapshot.flatMap { LinkPreviewSnapshot.decode($0, sourceURL: url) }
+    }
     self.url = url
     guard let url else { clear(); return }
     let result = await LinkPreviewLoader.shared.result(for: item, url: url)
