@@ -1,4 +1,5 @@
 import AppKit
+import Defaults
 import SwiftUI
 
 struct PreviewItemView: View {
@@ -25,6 +26,13 @@ struct PreviewItemView: View {
   @State private var metadataHeight: CGFloat = 114
   @State private var loadedPage: LoadedPage?
   @State private var isImageHovered = false
+  @Default(.showLinkPreviews) private var showLinkPreviews
+  @State private var linkState = LinkPreviewState()
+
+  private var linkURL: URL? { showLinkPreviews ? item.previewLinkURL : nil }
+  private var linkPreview: ClipboardLinkPreview? {
+    linkState.preview(for: linkURL)
+  }
 
   private var imageRequest: ImageRequest {
     ImageRequest(itemID: item.id, index: imageIndex, presentationID: presentationID)
@@ -76,8 +84,14 @@ struct PreviewItemView: View {
       guard !Task.isCancelled else { return }
       loadedPage = LoadedPage(request: request, page: page)
     }
+    .task(id: linkURL) {
+      await linkState.load(url: linkURL)
+    }
     .onChange(of: presentationID) { _, _ in isImageHovered = false }
-    .onDisappear { isImageHovered = false }
+    .onDisappear {
+      isImageHovered = false
+      linkState.clear()
+    }
   }
 
   @ViewBuilder
@@ -107,6 +121,22 @@ struct PreviewItemView: View {
       }
       .contentShape(Rectangle())
       .onHover { isImageHovered = $0 }
+    } else if let linkPreview {
+      GeometryReader { geometry in
+        ScrollView {
+          LinkPreviewCardView(preview: linkPreview,
+                              maximumImageHeight: max(40, geometry.size.height - 110), fontSize: 16)
+            .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+      }
+      .accessibilityIdentifier("previewLinkCard")
+    } else if let url = linkURL, let failure = linkState.failure(for: url) {
+      ScrollView {
+        LinkPreviewFailureView(url: url, failure: failure, maxTextLines: 20)
+          .padding(8)
+      }
+      .accessibilityIdentifier("previewLinkFailure")
     } else if item.previewText.byteCount >= Self.largeTextThreshold {
       LargeTextView(text: item.previewText.string)
         .padding(8)

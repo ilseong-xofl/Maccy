@@ -33,6 +33,9 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   var selectionId: UUID
   var appIcon: ApplicationImage?
   var image: NSImage?
+  var linkPreview: ClipboardLinkPreview?
+  var linkFailure: LinkPreviewFailure?
+  var linkURL: URL?
   var stackImages: [NSImage] = []
   var imageCount: Int = 1
   var accessoryImage: NSImage?
@@ -96,6 +99,21 @@ struct ListItemView<Title: View, ID: Hashable>: View {
           .padding(.vertical, 5)
           .frame(maxWidth: .infinity, alignment: .center)
           .layoutPriority(1)
+      } else if let linkPreview {
+        LinkPreviewCardView(preview: linkPreview, isSelected: isSelected,
+                            maximumImageHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
+          .padding(.trailing, 5)
+          .padding(.vertical, 6)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .layoutPriority(1)
+          .accessibilityHidden(true)
+      } else if let linkFailure, let linkURL {
+        LinkPreviewFailureView(url: linkURL, failure: linkFailure,
+                               isSelected: isSelected,
+                               maxTextLines: maxTextLines, isListRow: true)
+          .padding(.trailing, 5)
+          .padding(.vertical, 6)
+          .frame(maxWidth: .infinity, alignment: .leading)
       } else {
         ListItemTitleView(attributedTitle: attributedTitle, maxLines: maxTextLines, title: title)
           .accessibilityHidden(true)

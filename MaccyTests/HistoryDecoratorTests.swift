@@ -177,6 +177,99 @@ class HistoryItemDecoratorTests: XCTestCase {
     XCTAssertEqual(HistoryItemDecorator(item).listText, "My alias")
   }
 
+  func testLinkPreviewAcceptsCompleteHTTPSURL() {
+    let source = "https://github.com/PasteBar/PasteBarApp?tab=readme-ov-file#readme"
+    let itemDecorator = historyItemDecorator(source)
+
+    XCTAssertEqual(itemDecorator.previewLinkURL?.absoluteString, source)
+    XCTAssertEqual(itemDecorator.listText, source)
+  }
+
+  func testLinkPreviewExcludesProseContainingLinks() {
+    let url = "https://github.com/PasteBar/PasteBarApp"
+    for source in ["Read this: \(url)", "\(url) is useful", "\(url)\nhttps://example.com"] {
+      let itemDecorator = historyItemDecorator(source)
+
+      XCTAssertNil(itemDecorator.previewLinkURL, source)
+      XCTAssertEqual(itemDecorator.item.text, source)
+    }
+  }
+
+  func testLinkPreviewKeepsCustomAliasInsteadOfWebMetadata() {
+    let source = "https://github.com/PasteBar/PasteBarApp"
+    let item = historyItemDecorator(source).item
+    item.title = "Saved clipboard project"
+    let itemDecorator = HistoryItemDecorator(item)
+
+    XCTAssertNil(itemDecorator.previewLinkURL)
+    XCTAssertEqual(itemDecorator.listText, "Saved clipboard project")
+    XCTAssertEqual(itemDecorator.item.text, source)
+  }
+
+  func testLinkPreviewDoesNotTreatURLAliasAsCopiedURL() {
+    let item = historyItemDecorator("A note about clipboard apps").item
+    item.title = "https://github.com/PasteBar/PasteBarApp"
+    let itemDecorator = HistoryItemDecorator(item)
+
+    XCTAssertNil(itemDecorator.previewLinkURL)
+    XCTAssertEqual(itemDecorator.listText, item.title)
+    XCTAssertEqual(itemDecorator.item.text, "A note about clipboard apps")
+  }
+
+  func testImageWithURLTextAndTitleRemainsAnImage() {
+    let source = "https://github.com/PasteBar/PasteBarApp"
+    let image = NSImage(named: "StatusBarMenuImage")!
+    let item = HistoryItem(contents: [
+      HistoryItemContent(type: NSPasteboard.PasteboardType.tiff.rawValue, value: image.tiffRepresentation!),
+      HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data(source.utf8))
+    ])
+    Storage.shared.context.insert(item)
+    item.title = source
+    let itemDecorator = HistoryItemDecorator(item)
+
+    XCTAssertTrue(itemDecorator.hasImage)
+    XCTAssertNil(itemDecorator.previewLinkURL)
+    XCTAssertEqual(itemDecorator.item.text, source)
+  }
+
+  func testFileWithURLTextAndTitleDoesNotBecomeWebLink() {
+    let source = "https://github.com/PasteBar/PasteBarApp"
+    let fileURL = URL(fileURLWithPath: "/tmp/clipboard-project.txt")
+    let item = HistoryItem(contents: [
+      HistoryItemContent(type: NSPasteboard.PasteboardType.fileURL.rawValue, value: fileURL.dataRepresentation),
+      HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data(source.utf8))
+    ])
+    Storage.shared.context.insert(item)
+    item.title = source
+    let itemDecorator = HistoryItemDecorator(item)
+
+    XCTAssertTrue(itemDecorator.hasFileURLs)
+    XCTAssertNil(itemDecorator.previewLinkURL)
+    XCTAssertEqual(itemDecorator.item.fileURLs, [fileURL])
+    XCTAssertEqual(itemDecorator.item.text, source)
+  }
+
+  func testLinkPreviewCandidatePreservesAllClipboardRepresentations() {
+    let url = "https://github.com/PasteBar/PasteBarApp?tab=readme-ov-file#readme"
+    let source = "  \(url)\n"
+    let item = HistoryItem(contents: [
+      HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data(source.utf8)),
+      HistoryItemContent(type: "public.url", value: Data(url.utf8))
+    ])
+    Storage.shared.context.insert(item)
+    item.title = item.generateTitle()
+    let originalTitle = item.title
+    let originalTypes = item.contents.map(\.type)
+    let originalValues = item.contents.map(\.value)
+    let itemDecorator = HistoryItemDecorator(item)
+
+    XCTAssertEqual(itemDecorator.previewLinkURL?.absoluteString, url)
+    XCTAssertEqual(item.contents.map(\.type), originalTypes)
+    XCTAssertEqual(item.contents.map(\.value), originalValues)
+    XCTAssertEqual(item.text, source)
+    XCTAssertEqual(item.title, originalTitle)
+  }
+
   func testEditingContentUpdatesAutomaticTitleAndMultilinePreview() {
     let itemDecorator = historyItemDecorator("first\nsecond")
     let newText = "changed\n새로운 내용"

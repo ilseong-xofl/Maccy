@@ -207,11 +207,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       item.lastCopiedAt = item.firstCopiedAt
       item.title = item.generateTitle()
     }
+    seedPreviewDemoLinks(arguments: arguments, timestamp: timestamp)
     context.processPendingChanges()
     do {
       try context.save()
     } catch {
       assertionFailure("Cannot prepare preview demo: \(error.localizedDescription)")
+    }
+  }
+
+  private func seedPreviewDemoLinks(arguments: [String], timestamp: Date) {
+    for (index, argument) in arguments.enumerated() where argument == "--preview-link" {
+      guard arguments.indices.contains(index + 1),
+            let url = URL(string: arguments[index + 1]),
+            ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+            url.host != nil else { continue }
+      let content = HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue,
+                                       value: Data(url.absoluteString.utf8))
+      let item = HistoryItem(contents: [content])
+      Storage.shared.context.insert(item)
+      item.application = "com.apple.Safari"
+      item.firstCopiedAt = timestamp.addingTimeInterval(2 + Double(index))
+      item.lastCopiedAt = item.firstCopiedAt
+      item.title = item.generateTitle()
     }
   }
   #endif

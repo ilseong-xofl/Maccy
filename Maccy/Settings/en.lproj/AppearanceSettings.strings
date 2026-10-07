@@ -42,3 +42,5 @@
 "ShowHexColorSwatchTooltip" = "Show color swatch next to hex color codes.";
 "ShowFooter" = "Show bottom toolbar";
 "OpenPreferencesWarning" = "⚠️ Press ⌘, (command+comma) to open preferences when footer is hidden.";
+"ShowLinkPreviews" = "Show link previews";
+"ShowLinkPreviewsTooltip" = "Downloads titles and images from copied websites. Shows the link as text if a preview is unavailable.";

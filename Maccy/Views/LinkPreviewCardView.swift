@@ -1,0 +1,120 @@
+import SwiftUI
+
+extension LinkPreviewFailure {
+  var message: String {
+    switch self {
+    case .notFound:
+      String(localized: "link_preview_not_found", defaultValue: "Page not found")
+    case .unavailable:
+      String(localized: "link_preview_unavailable", defaultValue: "Preview unavailable")
+    case .connectionFailure:
+      String(localized: "link_preview_connection_failure", defaultValue: "Connection failed")
+    }
+  }
+}
+
+@MainActor
+@Observable
+final class LinkPreviewState {
+  private(set) var url: URL?
+  private(set) var result: LinkPreviewResult?
+
+  private var currentResult: LinkPreviewResult? {
+    guard let url else { return nil }
+    return LinkPreviewLoader.shared.cachedResult(for: url) ?? result
+  }
+
+  func preview(for url: URL?) -> ClipboardLinkPreview? {
+    guard self.url == url, case .preview(let preview) = currentResult else { return nil }
+    return preview
+  }
+
+  func failure(for url: URL?) -> LinkPreviewFailure? {
+    guard self.url == url, case .failure(let failure) = currentResult else { return nil }
+    return failure
+  }
+
+  func load(url: URL?) async {
+    if self.url != url { result = nil }
+    self.url = url
+    guard let url else { clear(); return }
+    let result = await LinkPreviewLoader.shared.result(for: url)
+    guard !Task.isCancelled, self.url == url else { return }
+    self.result = result
+  }
+
+  func clear() {
+    url = nil
+    result = nil
+  }
+}
+
+struct LinkPreviewFailureView: View {
+  let url: URL
+  let failure: LinkPreviewFailure
+  var isSelected = false
+  var maxTextLines = 5
+  var isListRow = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: isListRow ? 4 : 5) {
+      Text(verbatim: url.absoluteString)
+        .lineLimit(maxTextLines)
+        .fixedSize(horizontal: false, vertical: true)
+        .foregroundStyle(isSelected ? Color.white : .primary)
+      Group {
+        if isListRow {
+          HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Image(systemName: "exclamationmark.circle")
+            Text(verbatim: failure.message)
+          }
+        } else {
+          Label(failure.message, systemImage: "exclamationmark.circle")
+        }
+      }
+      .font(.system(size: 11))
+      .lineLimit(2)
+      .foregroundStyle(isSelected ? Color.white.opacity(0.8) : .secondary)
+    }
+  }
+}
+
+/// A passive card: selecting, dragging and copying still belong to the clipboard row.
+struct LinkPreviewCardView: View {
+  let preview: ClipboardLinkPreview
+  var isSelected = false
+  var maximumImageHeight: CGFloat = 300
+  var fontSize: CGFloat = 14
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      if let image = preview.image {
+        ListItemImageView(image: image, maximumHeight: maximumImageHeight)
+          .frame(maxWidth: .infinity)
+          .clipShape(.rect(cornerRadius: 6))
+      }
+
+      Text(verbatim: preview.title)
+        .font(.system(size: fontSize, weight: .semibold))
+        .foregroundStyle(isSelected ? Color.white : .primary)
+        .lineLimit(3)
+        .fixedSize(horizontal: false, vertical: true)
+
+      HStack(spacing: 5) {
+        Image(systemName: "link")
+          .font(.system(size: fontSize - 3, weight: .medium))
+        Text(verbatim: preview.url.absoluteString)
+          .font(.system(size: fontSize - 2))
+          .lineLimit(1)
+          .truncationMode(.middle)
+      }
+      .foregroundStyle(isSelected ? Color.white.opacity(0.8) : .secondary)
+    }
+    .padding(8)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(isSelected ? Color.white.opacity(0.08) : Color.primary.opacity(0.035),
+                in: .rect(cornerRadius: 9))
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(Text(verbatim: preview.title + ", " + preview.url.absoluteString))
+  }
+}

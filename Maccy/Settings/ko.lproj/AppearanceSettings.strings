@@ -42,3 +42,5 @@
 "OpenPreferencesWarning" = "⚠️ 푸터가 숨겨져 있을 때 설정을 열려면 ⌘, (command+comma)를 누르세요.";
 "ShowHexColorSwatch" = "16진수 색상 견본 표시";
 "ShowHexColorSwatchTooltip" = "16진수 색상 코드 옆에 색상 견본을 표시합니다.";
+"ShowLinkPreviews" = "링크 미리보기 표시";
+"ShowLinkPreviewsTooltip" = "복사한 웹사이트에서 제목과 이미지를 불러옵니다. 미리보기를 불러올 수 없으면 링크를 텍스트로 표시합니다.";

@@ -24,7 +24,20 @@ struct HistoryItemView: View {
 
   @Default(.showHexColorSwatch) private var showHexColorSwatch
   @Default(.textPreviewLines) private var textPreviewLines
+  @Default(.showLinkPreviews) private var showLinkPreviews
+  @State private var linkState = LinkPreviewState()
   @Environment(AppState.self) private var appState
+
+  private var linkURL: URL? { showLinkPreviews ? item.previewLinkURL : nil }
+  private var linkPreview: ClipboardLinkPreview? {
+    linkState.preview(for: linkURL)
+  }
+  private var linkFailure: LinkPreviewFailure? { linkState.failure(for: linkURL) }
+  private var linkAccessibilityLabel: String {
+    if let linkPreview { return linkPreview.title + ", " + item.accessibilityLabel }
+    if let linkFailure { return item.accessibilityLabel + ", " + linkFailure.message }
+    return item.accessibilityLabel
+  }
 
   private var colorSwatchImage: NSImage? {
     guard showHexColorSwatch else { return nil }
@@ -53,6 +66,9 @@ struct HistoryItemView: View {
       selectionId: item.id,
       appIcon: item.applicationImage,
       image: item.thumbnailImage,
+      linkPreview: linkPreview,
+      linkFailure: linkFailure,
+      linkURL: linkURL,
       stackImages: item.thumbnailImages,
       imageCount: item.previewImageCount,
       accessoryImage: item.thumbnailImage != nil ? nil : colorSwatchImage,
@@ -61,7 +77,7 @@ struct HistoryItemView: View {
       isSelected: item.isSelected,
       selectionIndex: item.multiSelectionIndex,
       selectionAppearance: selectionAppearance,
-      accessibilityLabel: item.accessibilityLabel,
+      accessibilityLabel: linkAccessibilityLabel,
       maxTextLines: min(max(textPreviewLines, 1), 20)
     ) {
       Text(verbatim: item.listText)
@@ -71,6 +87,10 @@ struct HistoryItemView: View {
     .onAppear {
       item.ensureThumbnailImage()
     }
+    .task(id: linkURL) {
+      await linkState.load(url: linkURL)
+    }
+    .onDisappear { linkState.clear() }
     .accessibilityAction(named: Text(item.isPinned ? "history_item_unpin_action" : "history_item_pin_action")) {
       appState.history.togglePin(item)
     }

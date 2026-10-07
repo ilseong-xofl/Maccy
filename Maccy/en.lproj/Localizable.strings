@@ -7,6 +7,9 @@
 "clear_all" = "Clear all";
 "about" = "About";
 "quit" = "Quit";
+"link_preview_not_found" = "Page not found";
+"link_preview_unavailable" = "Preview unavailable";
+"link_preview_connection_failure" = "Connection failed";
 "preferences" = "Preferences…";
 "clear_alert_message" = "Are you sure you want to clear the history?";
 "clear_alert_comment" = "You can't undo this action.";

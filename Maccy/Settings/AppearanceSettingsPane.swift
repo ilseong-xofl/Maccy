@@ -232,6 +232,11 @@ struct AppearanceSettingsPane: View {
         Defaults.Toggle(key: .showApplicationIcons) {
           Text("ShowApplicationIcons", tableName: "AppearanceSettings")
         }
+        Defaults.Toggle(key: .showLinkPreviews) {
+          Text("ShowLinkPreviews", tableName: "AppearanceSettings")
+        }
+        .help(Text("ShowLinkPreviewsTooltip", tableName: "AppearanceSettings"))
+
         Defaults.Toggle(key: .showHexColorSwatch) {
           Text("ShowHexColorSwatch", tableName: "AppearanceSettings")
         }

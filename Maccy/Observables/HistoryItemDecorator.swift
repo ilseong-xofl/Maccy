@@ -47,6 +47,14 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   var hasPlainText: Bool { item.text != nil }
   var hasRichText: Bool { item.rtf != nil || item.html != nil }
 
+  var previewLinkURL: URL? {
+    guard !hasImage, !hasFileURLs else { return nil }
+    let original = previewText.string.trimmingCharacters(in: .whitespacesAndNewlines)
+    // An explicit alias continues to replace the row's content, including a URL.
+    guard listText.trimmingCharacters(in: .whitespacesAndNewlines) == original else { return nil }
+    return LinkPreviewLoader.candidateURL(from: original)
+  }
+
   var thumbnailImageGenerationTask: Task<Void, Never>?
   private var imageGenerationID = UUID()
   private var previewPageCache: [Int: ClipboardPreviewImage] = [:]
