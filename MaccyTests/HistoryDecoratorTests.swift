@@ -930,10 +930,10 @@ class DetachedPreviewAutomaticSizingTests: XCTestCase {
     XCTAssertEqual(wrapped.height, singleLine.height + 20)
   }
 
-  func testSavedManualBaselineRetainsItsWidthWhileShortImagesFitHeight() {
-    let savedBaseline = NSSize(width: 900, height: 800)
+  func testAutomaticSizingRetainsProvidedMaximumWidthWhileShortImagesFitHeight() {
+    let providedMaximum = NSSize(width: 900, height: 800)
     let size = DetachedPreviewController.automaticSize(
-      imageSize: NSSize(width: 200, height: 100), maximumSize: savedBaseline,
+      imageSize: NSSize(width: 200, height: 100), maximumSize: providedMaximum,
       imageWidth: 888, nonImageHeight: nonImageHeight)
     XCTAssertEqual(size, NSSize(width: 900, height: 624))
   }
@@ -969,6 +969,106 @@ class DetachedPreviewAutomaticSizingTests: XCTestCase {
     DetachedPreviewController.automaticSize(
       imageSize: imageSize, maximumSize: maximumSize,
       imageWidth: imageWidth, nonImageHeight: nonImageHeight)
+  }
+}
+
+@MainActor
+class DetachedPreviewSessionSizingTests: XCTestCase {
+  func testOpeningIgnoresLegacyRememberedWindowSize() throws {
+    try withPreviewSession { controller, anchor in
+      let legacySize = NSSize(width: 900, height: 800)
+      Defaults[.previewWindowSize] = legacySize
+
+      controller.togglePreview()
+
+      let window = try XCTUnwrap(controller.window)
+      XCTAssertTrue(controller.isVisible)
+      XCTAssertEqual(controller.sessionSize, DetachedPreviewController.defaultSize)
+      XCTAssertEqual(window.frame, try defaultFrame(nextTo: anchor))
+      XCTAssertEqual(Defaults[.previewWindowSize], legacySize)
+    }
+  }
+
+  func testManualResizeAppliesUntilCloseAndReopeningRestoresDefaultSize() throws {
+    try withPreviewSession { controller, anchor in
+      let legacySize = NSSize(width: 900, height: 800)
+      Defaults[.previewWindowSize] = legacySize
+      controller.togglePreview()
+      let window = try XCTUnwrap(controller.window)
+      let manualSize = NSSize(width: 420, height: 400)
+
+      controller.windowWillStartLiveResize(
+        Notification(name: NSWindow.willStartLiveResizeNotification, object: window))
+      window.setFrame(NSRect(origin: window.frame.origin, size: manualSize), display: false)
+      controller.windowDidEndLiveResize(
+        Notification(name: NSWindow.didEndLiveResizeNotification, object: window))
+
+      XCTAssertEqual(controller.sessionSize, manualSize)
+      XCTAssertEqual(window.frame.size, manualSize)
+      controller.reposition()
+      XCTAssertEqual(window.frame.size, manualSize)
+      XCTAssertEqual(Defaults[.previewWindowSize], legacySize)
+
+      // Escape and Space route through these same close/open operations.
+      controller.close(restoreListFocus: true)
+      XCTAssertFalse(controller.isVisible)
+      controller.togglePreview()
+
+      XCTAssertTrue(controller.isVisible)
+      XCTAssertTrue(controller.window === window)
+      XCTAssertEqual(controller.sessionSize, DetachedPreviewController.defaultSize)
+      XCTAssertEqual(window.frame, try defaultFrame(nextTo: anchor))
+      XCTAssertEqual(Defaults[.previewWindowSize], legacySize)
+    }
+  }
+
+  private func defaultFrame(nextTo anchor: NSWindow) throws -> NSRect {
+    let screen = try XCTUnwrap(anchor.screen ?? NSScreen.main)
+    return DetachedPreviewController.placement(
+      anchorFrame: anchor.frame, visibleFrame: screen.visibleFrame,
+      requestedSize: DetachedPreviewController.defaultSize, direction: Defaults[.previewDirection])
+  }
+
+  private func withPreviewSession(
+    _ test: (DetachedPreviewController, NSWindow) throws -> Void
+  ) throws {
+    let screen = try XCTUnwrap(NSScreen.main)
+    let appState = AppState.shared
+    let savedDelegate = appState.appDelegate
+    let savedNavigator = appState.navigator
+    let savedPreview = appState.preview
+    let savedFocus = appState.requestedKeyboardFocus
+    let savedSearchFocused = appState.isSearchFocused
+    let savedEditing = appState.isEditingItem
+    let savedSize = Defaults[.previewWindowSize]
+    let controller = DetachedPreviewController()
+    let delegate = AppDelegate()
+    delegate.panel = FloatingPanel(
+      contentRect: NSRect(x: screen.visibleFrame.midX - 160, y: screen.visibleFrame.midY - 200,
+                          width: 320, height: 400), onClose: {}) { ContentView() }
+    // The anchor needs native window geometry, not the history-list view or its observers.
+    delegate.panel.contentView = NSView()
+    appState.appDelegate = delegate
+    appState.preview = controller
+    appState.navigator = NavigationManager(history: appState.history, footer: Footer())
+    appState.isEditingItem = false
+    defer {
+      controller.close()
+      controller.window?.contentView = nil
+      delegate.panel.orderOut(nil)
+      appState.appDelegate = savedDelegate
+      appState.navigator = savedNavigator
+      appState.preview = savedPreview
+      appState.requestKeyboardFocus(savedFocus)
+      appState.isSearchFocused = savedSearchFocused
+      appState.isEditingItem = savedEditing
+      Defaults[.previewWindowSize] = savedSize
+    }
+    let item = HistoryItem(contents: [HistoryItemContent(
+      type: NSPasteboard.PasteboardType.string.rawValue, value: Data("Preview sizing fixture".utf8))])
+    appState.navigator.selectWithoutScrolling(item: HistoryItemDecorator(item))
+    delegate.panel.orderFront(nil)
+    try test(controller, delegate.panel)
   }
 }
 

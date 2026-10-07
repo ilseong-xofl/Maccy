@@ -18,6 +18,7 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
 
   private(set) var isVisible = false
   @ObservationIgnored private(set) var window: NSPanel?
+  @ObservationIgnored private(set) var sessionSize = DetachedPreviewController.defaultSize
   @ObservationIgnored private var automaticallyFitsImage = true
   @ObservationIgnored private var contentMetrics: ContentMetrics?
   @ObservationIgnored private var directionObservation: Task<Void, Never>?
@@ -48,6 +49,7 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     }
     guard canPreviewSelection, let anchor = listWindow, anchor.isVisible else { return }
     if window == nil { makeWindow() }
+    sessionSize = Self.defaultSize
     automaticallyFitsImage = true
     isVisible = true
     reposition()
@@ -87,7 +89,7 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
                             height: min(Self.minimumSize.height, visibleFrame.height))
     window.maxSize = visibleFrame.size
     let maximumFrame = Self.placement(anchorFrame: anchor.frame, visibleFrame: visibleFrame,
-                                     requestedSize: Defaults[.previewWindowSize], direction: Defaults[.previewDirection])
+                                     requestedSize: sessionSize, direction: Defaults[.previewDirection])
     var requestedSize = maximumFrame.size
     let nativeChromeHeight = maximumFrame.height - window.contentRect(forFrameRect: maximumFrame).height
     if automaticallyFitsImage, let metrics = contentMetrics,
@@ -99,7 +101,7 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     }
     let frame = Self.placement(anchorFrame: anchor.frame, visibleFrame: visibleFrame,
                                requestedSize: requestedSize, direction: Defaults[.previewDirection])
-    // Auto-fit and screen constraints never become the next opening's baseline size.
+    // Auto-fit and screen constraints never change the current session's baseline size.
     if window.frame != frame { window.setFrame(frame, display: true) }
   }
 
@@ -127,7 +129,7 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
 
   func windowDidEndLiveResize(_ notification: Notification) {
     guard let resizedWindow = notification.object as? NSWindow, resizedWindow === window else { return }
-    Defaults[.previewWindowSize] = resizedWindow.frame.size
+    sessionSize = resizedWindow.frame.size
     reposition()
   }
 
@@ -151,7 +153,7 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
   }
 
   private func makeWindow() {
-    let panel = DetachedPreviewPanel(contentRect: NSRect(origin: .zero, size: Defaults[.previewWindowSize]),
+    let panel = DetachedPreviewPanel(contentRect: NSRect(origin: .zero, size: Self.defaultSize),
                                      styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
                                      backing: .buffered, defer: false)
     panel.title = NSLocalizedString("ShowPreview", tableName: "GeneralSettings", comment: "")

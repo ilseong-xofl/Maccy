@@ -67,6 +67,7 @@ nonisolated extension Defaults.Keys {
   static let openPreviewAutomatically = Key<Bool>("openPreviewAutomatically", default: false, suite: preferencesSuite)
   static let previewDelay = Key<Int>("previewDelay", default: 1500, suite: preferencesSuite)
   static let previewDirection = Key<PreviewDirection>("previewDirection", default: .right, suite: preferencesSuite)
+  // Legacy preference. Detached previews now reset their size each time they open.
   static let previewWindowSize = Key<NSSize>(
     "previewWindowSize", default: DetachedPreviewController.defaultSize, suite: preferencesSuite
   )
