@@ -9,7 +9,7 @@
 "PopupAtTooltip" = "Change the location where popup appears.\nDefault: Cursor.";
 "SearchVisibilityAlways" = "Always";
 "SearchVisibilityDuringSearch" = "During search";
-"ActiveScreen" = "Active screen";
+"ActiveScreen" = "Screen with cursor";
 "PinTo" = "Pin to:";
 "PinToTop" = "Top";
 "PinToBottom" = "Bottom";

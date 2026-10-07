@@ -581,6 +581,63 @@ class ClipboardImagePreviewTests: XCTestCase {
 }
 
 @MainActor
+class PopupScreenSelectionTests: XCTestCase {
+  private let screens = [
+    NSRect(x: 0, y: 0, width: 1920, height: 1080),
+    NSRect(x: -1440, y: 0, width: 1440, height: 900),
+    NSRect(x: 0, y: 1080, width: 2560, height: 1440)
+  ]
+
+  func testAutomaticScreenFollowsCursorAcrossDisplays() {
+    for (point, expected) in [(NSPoint(x: 500, y: 500), 0),
+                              (NSPoint(x: -700, y: 450), 1),
+                              (NSPoint(x: 1200, y: 1800), 2)] {
+      XCTAssertEqual(NSScreen.popupScreenIndex(desiredScreen: 0, screenFrames: screens,
+                                              mouseLocation: point), expected)
+    }
+  }
+
+  func testExplicitScreenTakesPriorityOverCursor() {
+    XCTAssertEqual(NSScreen.popupScreenIndex(desiredScreen: 1, screenFrames: screens,
+                                            mouseLocation: NSPoint(x: -700, y: 450)), 0)
+  }
+
+  func testUnavailableScreenFallsBackToCursorDisplay() {
+    for selection in [-1, 4] {
+      XCTAssertEqual(NSScreen.popupScreenIndex(desiredScreen: selection, screenFrames: screens,
+                                              mouseLocation: NSPoint(x: -700, y: 450)), 1)
+    }
+  }
+
+  func testMenuBarAndDockAreasStillSelectTheirDisplay() {
+    for point in [NSPoint(x: -700, y: 899), NSPoint(x: -700, y: 1)] {
+      XCTAssertEqual(NSScreen.popupScreenIndex(desiredScreen: 0, screenFrames: screens,
+                                              mouseLocation: point), 1)
+    }
+  }
+
+  func testDisplayGapAndMissingScreensAllowMainScreenFallback() {
+    XCTAssertNil(NSScreen.popupScreenIndex(desiredScreen: 0, screenFrames: screens,
+                                          mouseLocation: NSPoint(x: -700, y: 1800)))
+    XCTAssertNil(NSScreen.popupScreenIndex(desiredScreen: 0, screenFrames: [], mouseLocation: .zero))
+  }
+
+  func testCenteredPopupUsesCursorDisplayWithAutomaticSelection() throws {
+    let previousScreen = Defaults[.popupScreen]
+    Defaults[.popupScreen] = 0
+    defer { Defaults[.popupScreen] = previousScreen }
+    let mouseLocation = NSEvent.mouseLocation
+    let expectedScreen = try XCTUnwrap(
+      NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main
+    )
+    let size = NSSize(width: 640, height: 500)
+    let origin = PopupPosition.center.origin(size: size, statusBarButton: nil)
+    XCTAssertEqual(origin.x + size.width / 2, expectedScreen.visibleFrame.midX, accuracy: 1)
+    XCTAssertEqual(origin.y + size.height / 2, expectedScreen.visibleFrame.midY, accuracy: 1)
+  }
+}
+
+@MainActor
 class FloatingPanelSizingTests: XCTestCase {
   func testResizeDelegateAllowsNarrowerWindowWithFixedWidthContent() {
     withRestoredWindowState {
