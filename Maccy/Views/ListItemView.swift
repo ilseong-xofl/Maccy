@@ -99,7 +99,6 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   var isFavorite: Bool? = nil
   var selectionIndex: Int?
   var help: LocalizedStringKey?
-  var selectionAppearance: SelectionAppearance = .none
   // Complete description used when the row's visual content is hidden from accessibility.
   var accessibilityLabel: String = ""
   var maxTextLines: Int = 1
@@ -136,7 +135,6 @@ struct ListItemView<Title: View, ID: Hashable>: View {
         }
         .padding(.leading, accessoryEdgePadding)
         .padding(.trailing, accessoryContentSpacing)
-        .padding(.vertical, 5)
       } else {
         Spacer()
           .frame(width: accessoryEdgePadding)
@@ -147,7 +145,6 @@ struct ListItemView<Title: View, ID: Hashable>: View {
           .accessibilityIdentifier("copy-history-item")
           .accessibilityHidden(true)
           .padding(.trailing, 5)
-          .padding(.vertical, 5)
       }
 
       if let image {
@@ -162,26 +159,21 @@ struct ListItemView<Title: View, ID: Hashable>: View {
         }
           .accessibilityIdentifier("copy-history-item")
           .accessibilityHidden(true)
-          .padding(.vertical, 5)
           .frame(maxWidth: .infinity, alignment: .center)
           .layoutPriority(1)
       } else if let linkPreview {
-        LinkPreviewCardView(preview: linkPreview, isSelected: isSelected,
+        LinkPreviewCardView(preview: linkPreview,
                             maximumImageHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
-          .padding(.vertical, 6)
           .frame(maxWidth: .infinity, alignment: .leading)
           .layoutPriority(1)
           .accessibilityHidden(true)
       } else if let linkFailure, let linkURL {
         LinkPreviewFailureView(url: linkURL, failure: linkFailure,
-                               isSelected: isSelected,
                                maxTextLines: maxTextLines, isListRow: true)
-          .padding(.vertical, 6)
           .frame(maxWidth: .infinity, alignment: .leading)
       } else {
         ListItemTitleView(attributedTitle: attributedTitle, maxLines: maxTextLines, title: title)
           .accessibilityHidden(true)
-          .padding(.vertical, maxTextLines > 1 ? 6 : 0)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
 
@@ -195,7 +187,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
             .frame(minWidth: 10, alignment: .center)
             .padding(3)
             .background(
-              Color.secondary.opacity(isSelected ? 0.5 : 0.8),
+              Color.secondary.opacity(0.8),
               in: Capsule()
             )
             .foregroundStyle(Color.white)
@@ -230,19 +222,27 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       .fixedSize(horizontal: true, vertical: false)
       .padding(.trailing, accessoryEdgePadding)
     }
+    .padding(.vertical, 8)
     .frame(minHeight: Popup.itemHeight)
     .id(id)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .overlay(alignment: .bottom) {
-      if maxTextLines > 1 {
-        Divider().padding(.horizontal, 10).opacity(isSelected ? 0 : 0.45)
+    .foregroundStyle(.primary)
+    .background(Color.white.opacity(0.001))
+    .overlay {
+      if isSelected {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .strokeBorder(Color.accentColor, lineWidth: 1.5)
+          .allowsHitTesting(false)
       }
     }
-    .foregroundStyle(isSelected ? Color.white : .primary)
-    .background(
-      isSelected ? Color.accentColor.opacity(0.8) : .white.opacity(0.001),
-      in: selectionAppearance.rect(cornerRadius: Popup.cornerRadius)
-    )
+    .padding(.vertical, 4)
+    .overlay(alignment: .bottom) {
+      Rectangle()
+        .fill(Color.primary.opacity(0.16))
+        .frame(height: 1)
+        .padding(.horizontal, 10)
+        .allowsHitTesting(false)
+    }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(Text(accessibilityLabel))
     .accessibilityAddTraits(isSelected ? .isSelected : [])

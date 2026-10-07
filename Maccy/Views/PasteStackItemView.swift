@@ -40,7 +40,6 @@ struct PasteStackItemView: View {
       shortcuts: [],
       isSelected: isSelected,
       selectionIndex: index,
-      selectionAppearance: .none,
       accessibilityLabel: item.listText,
       maxTextLines: min(max(textPreviewLines, 1), 20)
     ) {

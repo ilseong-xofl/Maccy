@@ -84,9 +84,7 @@ struct PasteStackView: View {
           )
           .opacity(index > 0 ? 0 : 1)
           .background(
-            appState.navigator.pasteStackSelected
-              ? Color.accentColor.opacity(0.8)
-              : Color(nsColor: .tertiarySystemFill).opacity(0.8)
+            Color(nsColor: .tertiarySystemFill).opacity(0.8)
           )
           .background(.thinMaterial)
           .clipShape(SelectionAppearance.none.rect(cornerRadius: Popup.cornerRadius))

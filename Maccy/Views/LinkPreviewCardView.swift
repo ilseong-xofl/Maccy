@@ -59,7 +59,6 @@ final class LinkPreviewState {
 struct LinkPreviewFailureView: View {
   let url: URL
   let failure: LinkPreviewFailure
-  var isSelected = false
   var maxTextLines = 5
   var isListRow = false
 
@@ -68,7 +67,7 @@ struct LinkPreviewFailureView: View {
       Text(verbatim: url.absoluteString)
         .lineLimit(maxTextLines)
         .fixedSize(horizontal: false, vertical: true)
-        .foregroundStyle(isSelected ? Color.white : .primary)
+        .foregroundStyle(.primary)
       Group {
         if isListRow {
           HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -81,7 +80,7 @@ struct LinkPreviewFailureView: View {
       }
       .font(.system(size: 11))
       .lineLimit(2)
-      .foregroundStyle(isSelected ? Color.white.opacity(0.8) : .secondary)
+      .foregroundStyle(.secondary)
     }
   }
 }
@@ -89,7 +88,6 @@ struct LinkPreviewFailureView: View {
 /// A passive card: selecting, dragging and copying still belong to the clipboard row.
 struct LinkPreviewCardView: View {
   let preview: ClipboardLinkPreview
-  var isSelected = false
   var maximumImageHeight: CGFloat = 300
   var fontSize: CGFloat = 14
 
@@ -103,7 +101,7 @@ struct LinkPreviewCardView: View {
 
       Text(verbatim: preview.title)
         .font(.system(size: fontSize, weight: .semibold))
-        .foregroundStyle(isSelected ? Color.white : .primary)
+        .foregroundStyle(.primary)
         .lineLimit(3)
         .fixedSize(horizontal: false, vertical: true)
 
@@ -115,11 +113,11 @@ struct LinkPreviewCardView: View {
           .lineLimit(1)
           .truncationMode(.middle)
       }
-      .foregroundStyle(isSelected ? Color.white.opacity(0.8) : .secondary)
+      .foregroundStyle(.secondary)
     }
     .padding(8)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(isSelected ? Color.white.opacity(0.08) : Color.primary.opacity(0.035),
+    .background(Color.primary.opacity(0.035),
                 in: .rect(cornerRadius: 9))
     .accessibilityElement(children: .combine)
     .accessibilityLabel(Text(verbatim: preview.title + ", " + preview.url.absoluteString))

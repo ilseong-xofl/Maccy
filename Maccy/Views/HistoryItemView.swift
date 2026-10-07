@@ -7,21 +7,6 @@ struct HistoryItemView: View {
   var next: HistoryItemDecorator?
   var index: Int
 
-  private var selectionAppearance: SelectionAppearance {
-    let previousSelected = previous?.isSelected ?? false
-    let nextSelected = next?.isSelected ?? false
-    switch (previousSelected, nextSelected) {
-    case (true, false):
-      return .topConnection
-    case (false, true):
-      return .bottomConnection
-    case (true, true):
-      return .topBottomConnection
-    default:
-      return .none
-    }
-  }
-
   @Default(.showHexColorSwatch) private var showHexColorSwatch
   @Default(.textPreviewLines) private var textPreviewLines
   @Default(.showLinkPreviews) private var showLinkPreviews
@@ -83,7 +68,6 @@ struct HistoryItemView: View {
       isPinned: item.isPinned,
       isFavorite: item.isFavorite,
       selectionIndex: item.multiSelectionIndex,
-      selectionAppearance: selectionAppearance,
       accessibilityLabel: linkAccessibilityLabel,
       maxTextLines: min(max(textPreviewLines, 1), 20)
     ) {
