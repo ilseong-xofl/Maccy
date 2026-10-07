@@ -60,6 +60,11 @@ struct HistoryItemView: View {
     }
   }
 
+  private func toggleFavorite() {
+    appState.requestKeyboardFocus(.list)
+    appState.history.toggleFavorite(item)
+  }
+
   var body: some View {
     ListItemView(
       id: item.id,
@@ -76,6 +81,7 @@ struct HistoryItemView: View {
       shortcuts: item.shortcuts,
       isSelected: item.isSelected,
       isPinned: item.isPinned,
+      isFavorite: item.isFavorite,
       selectionIndex: item.multiSelectionIndex,
       selectionAppearance: selectionAppearance,
       accessibilityLabel: linkAccessibilityLabel,
@@ -84,7 +90,8 @@ struct HistoryItemView: View {
       Text(verbatim: item.listText)
     }
     .accessibilityIdentifier("copy-history-item")
-    .clipboardItemInteraction(onSelect: selectForInteraction, onActivate: activate)
+    .clipboardItemInteraction(onSelect: selectForInteraction, onActivate: activate,
+                              onToggleFavorite: toggleFavorite)
     .onAppear {
       item.ensureThumbnailImage()
     }
@@ -97,6 +104,9 @@ struct HistoryItemView: View {
     }
     .accessibilityAction(named: Text("history_item_delete_action")) {
       appState.history.delete(item)
+    }
+    .accessibilityAction(named: Text(item.isFavorite ? "favorite_remove" : "favorite_add")) {
+      toggleFavorite()
     }
   }
 }

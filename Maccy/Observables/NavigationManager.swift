@@ -5,6 +5,9 @@ import SwiftUI
 class NavigationManager { // swiftlint:disable:this type_body_length
   private var history: History
   private var footer: Footer
+  private var visiblePasteStack: PasteStack? {
+    history.filter == .history ? history.pasteStack : nil
+  }
 
   init(history: History, footer: Footer) {
     self.history = history
@@ -26,7 +29,7 @@ class NavigationManager { // swiftlint:disable:this type_body_length
     if let footerItem = footer.selectedItem {
       return footerItem.id
     }
-    return history.pasteStack?.id
+    return visiblePasteStack?.id
   }
   private(set) var leadHistoryItem: HistoryItemDecorator? {
     didSet {
@@ -53,7 +56,7 @@ class NavigationManager { // swiftlint:disable:this type_body_length
   }
 
   var pasteStackSelected: Bool {
-    return leadSelection != nil && leadSelection == history.pasteStack?.id
+    return leadSelection != nil && leadSelection == visiblePasteStack?.id
   }
 
   var isManualMultiSelect: Bool = false
@@ -160,7 +163,7 @@ class NavigationManager { // swiftlint:disable:this type_body_length
   }
 
   func selectWithoutScrolling(id: UUID) {
-    if let stack = history.pasteStack,
+    if let stack = visiblePasteStack,
        stack.id == id {
       selectWithoutScrolling(item: nil, footerItem: nil)
     } else if let item = history.items.first(where: { $0.id == id }) {
@@ -235,7 +238,7 @@ class NavigationManager { // swiftlint:disable:this type_body_length
     if let historyItem = history.firstVisibleItem(where: { $0.id == lead }) {
       if let nextItem = history.visibleItem(before: historyItem) {
         selectFromKeyboardNavigation(item: nextItem)
-      } else if history.pasteStack != nil {
+      } else if visiblePasteStack != nil {
         selectWithoutScrolling(item: nil)
       } else {
         highlightFirst()
@@ -252,7 +255,7 @@ class NavigationManager { // swiftlint:disable:this type_body_length
   func highlightNext(allowCycle: Bool = false) {
     guard let lead = leadSelection else { return }
 
-    if leadSelection == history.pasteStack?.id {
+    if leadSelection == visiblePasteStack?.id {
       highlightFirst()
       return
     }

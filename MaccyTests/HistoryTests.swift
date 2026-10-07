@@ -996,3 +996,258 @@ final class NumericClipboardShortcutTests: XCTestCase {
     )!
   }
 }
+
+
+@MainActor
+final class FavoriteHistoryTests: XCTestCase {
+  // The hosted SwiftUI app can retain outgoing animated rows after a fixture returns.
+  // Keep their in-memory stores alive until the test process exits.
+  private static var retainedContainers: [ModelContainer] = []
+
+  func testFavoritePersistsIndependentlyOfPinAndSessionFilter() async throws {
+    try await withHistory { history in
+      let item = try XCTUnwrap(history.firstUnpinnedItem)
+      let modelID = item.item.id
+      XCTAssertEqual(history.filter, .history)
+      XCTAssertFalse(item.isFavorite)
+      history.toggleFavorite(item)
+      history.togglePin(item)
+      XCTAssertTrue(item.isFavorite)
+      XCTAssertTrue(item.isPinned)
+      let freshContext = ModelContext(Storage.shared.container)
+      let saved = try XCTUnwrap(freshContext.fetch(FetchDescriptor<HistoryItem>())
+        .first { $0.id == modelID })
+      XCTAssertTrue(saved.isFavorite)
+      XCTAssertNotNil(saved.pin)
+      history.filter = .favorites
+      let reloaded = History()
+      try await reloaded.load()
+      XCTAssertEqual(reloaded.filter, .history)
+      XCTAssertTrue(try XCTUnwrap(reloaded.items.first { $0.item.id == modelID }).isFavorite)
+      history.togglePin(item)
+      XCTAssertTrue(item.isFavorite)
+      XCTAssertFalse(item.isPinned)
+    }
+  }
+
+  func testFavoritesIntersectSearchAndReassignOnlyVisibleUnpinnedNumbers() async throws {
+    try await withHistory { history in
+      let originalItems = history.items.toArray()
+      let alpha = try XCTUnwrap(originalItems.first { $0.title == "Alpha favorite" })
+      let beta = try XCTUnwrap(originalItems.first { $0.title == "Beta favorite" })
+      let ordinary = try XCTUnwrap(originalItems.first { $0.title == "Alpha ordinary" })
+      let pinned = try XCTUnwrap(originalItems.first { $0.title == "Alpha pinned" })
+      history.toggleFavorite(alpha)
+      history.toggleFavorite(beta)
+      history.togglePin(pinned)
+      history.filter = .favorites
+      XCTAssertEqual(Set(history.items.map(\.id)), Set([alpha.id, beta.id]))
+      XCTAssertTrue(ordinary.shortcuts.isEmpty)
+      XCTAssertTrue(pinned.shortcuts.isEmpty)
+      XCTAssertEqual(alpha.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
+      XCTAssertEqual(beta.shortcuts.map(\.key), KeyShortcut.create(character: "2").map(\.key))
+
+      history.toggleFavorite(pinned)
+      history.searchQuery = "Alpha"
+      try await Task.sleep(for: .milliseconds(250))
+      XCTAssertEqual(Set(history.items.map(\.id)), Set([alpha.id, pinned.id]))
+      XCTAssertTrue(beta.shortcuts.isEmpty)
+      XCTAssertTrue(pinned.shortcuts.isEmpty)
+      XCTAssertEqual(alpha.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
+      history.filter = .history
+      XCTAssertEqual(Set(history.items.map(\.id)), Set([alpha.id, ordinary.id, pinned.id]))
+      XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItem>()), originalItems.count)
+    }
+  }
+
+  func testFilterChangeRejectsCapturedShortcutAndPreservesUnfilteredLatestItem() async throws {
+    try await withHistory { history in
+      let latest = try XCTUnwrap(history.firstUnpinnedItem)
+      let favorite = history.unpinnedItems[1]
+      history.toggleFavorite(favorite)
+      let event = try XCTUnwrap(NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+        characters: "1", charactersIgnoringModifiers: "1", isARepeat: false, keyCode: 18))
+      let captured = try XCTUnwrap(history.shortcutActivation(for: event, context: .init()))
+      XCTAssertTrue(history.canActivateShortcut(captured))
+      history.filter = .favorites
+      XCTAssertFalse(history.canActivateShortcut(captured))
+      XCTAssertEqual(history.firstUnfilteredUnpinnedItem?.id, latest.id)
+      let filtered = try XCTUnwrap(history.shortcutActivation(for: event, context: .init()))
+      XCTAssertEqual(filtered.item.id, favorite.id)
+      XCTAssertTrue(history.canActivateShortcut(filtered))
+      history.toggleFavorite(favorite)
+      XCTAssertFalse(history.canActivateShortcut(filtered))
+      XCTAssertNil(history.shortcutActivation(for: event, context: .init()))
+    }
+  }
+
+  func testFilterAndUnfavoriteRemoveHiddenSelectionsAndEmptyLead() async throws {
+    try await withHistory { history in
+      let favorite = try XCTUnwrap(history.firstUnpinnedItem)
+      let ordinary = history.unpinnedItems[1]
+      history.toggleFavorite(favorite)
+      let navigator = AppState.shared.navigator
+      navigator.select(item: ordinary)
+      history.filter = .favorites
+      XCTAssertEqual(navigator.leadHistoryItem?.id, favorite.id)
+      XCTAssertEqual(navigator.selection.items.map(\.id), [favorite.id])
+      XCTAssertFalse(ordinary.isSelected)
+      history.toggleFavorite(favorite)
+      XCTAssertTrue(history.items.isEmpty)
+      XCTAssertTrue(navigator.selection.isEmpty)
+      XCTAssertNil(navigator.leadHistoryItem)
+      XCTAssertFalse(AppState.shared.preview.isVisible)
+      XCTAssertTrue(favorite.shortcuts.isEmpty)
+      XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItem>()), 4)
+    }
+  }
+
+  func testAutomaticLimitAndOrdinaryClearProtectFavoritesAndPins() async throws {
+    try await withHistory { history in
+      let favorite = try XCTUnwrap(history.items.first { $0.title == "Beta favorite" })
+      let pinned = try XCTUnwrap(history.items.first { $0.title == "Alpha pinned" })
+      history.toggleFavorite(favorite)
+      history.togglePin(pinned)
+      Defaults[.size] = 1
+      try await history.load()
+      XCTAssertEqual(history.items.count, 3)
+      XCTAssertEqual(history.items.filter(\.isFavorite).count, 1)
+      XCTAssertEqual(history.pinnedItems.count, 1)
+      Storage.shared.context.insert(HistoryItemContent(
+        type: NSPasteboard.PasteboardType.string.rawValue, value: Data("Orphan".utf8)))
+      try Storage.shared.context.save()
+      history.filter = .favorites
+      history.clear()
+      history.filter = .history
+      XCTAssertEqual(history.items.count, 2)
+      XCTAssertEqual(history.items.filter(\.isFavorite).count, 1)
+      XCTAssertEqual(history.pinnedItems.count, 1)
+      XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItem>()), 2)
+      XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItemContent>()), 2)
+      XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItemContent>(
+        predicate: #Predicate { $0.item == nil })), 0)
+    }
+  }
+
+  func testDirectDeleteAndClearAllRemoveFavorites() async throws {
+    try await withHistory { history in
+      let first = try XCTUnwrap(history.firstUnpinnedItem)
+      let second = history.unpinnedItems[1]
+      history.toggleFavorite(first)
+      history.toggleFavorite(second)
+      history.togglePin(second)
+      history.filter = .favorites
+      history.delete(first)
+      XCTAssertEqual(history.items.map(\.id), [second.id])
+      history.clearAll()
+      XCTAssertTrue(history.items.isEmpty)
+      XCTAssertTrue(AppState.shared.navigator.selection.isEmpty)
+      XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItem>()), 0)
+      XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItemContent>()), 0)
+    }
+  }
+
+  func testRecopyInFavoritesPreservesSavedFavoritePinAndRawContents() async throws {
+    try await withHistory { history in
+      let item = try XCTUnwrap(history.firstUnpinnedItem)
+      history.toggleFavorite(item)
+      history.togglePin(item)
+      let pin = item.item.pin
+      let pinOrder = Defaults[.pinOrder]
+      let raw = item.item.contents.compactMap(\.value)
+      Defaults[.size] = 3
+      history.filter = .favorites
+      let incoming = HistoryItem(contents: [HistoryItemContent(
+        type: NSPasteboard.PasteboardType.string.rawValue, value: raw.first)])
+      Storage.shared.context.insert(incoming)
+      incoming.title = item.title
+      let replacement = history.add(incoming)
+      XCTAssertTrue(replacement.isFavorite)
+      XCTAssertEqual(replacement.item.pin, pin)
+      XCTAssertEqual(Defaults[.pinOrder], pinOrder)
+      XCTAssertEqual(replacement.item.contents.compactMap(\.value), raw)
+      XCTAssertEqual(history.items.map(\.id), [replacement.id])
+      let freshContext = ModelContext(Storage.shared.container)
+      let stored = try XCTUnwrap(freshContext.fetch(FetchDescriptor<HistoryItem>())
+        .first { $0.id == replacement.item.id })
+      XCTAssertTrue(stored.isFavorite)
+      XCTAssertEqual(stored.pin, pin)
+      XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItem>()), 4)
+    }
+  }
+
+  func testRemovingProtectionAppliesOrdinaryHistoryQuota() async throws {
+    try await withHistory { history in
+      let oldest = try XCTUnwrap(history.lastVisibleItem)
+      history.toggleFavorite(oldest)
+      history.togglePin(oldest)
+      Defaults[.size] = 1
+      try await history.load()
+      let protected = try XCTUnwrap(history.firstPinnedItem)
+      history.togglePin(protected)
+      XCTAssertTrue(protected.isFavorite)
+      XCTAssertEqual(history.items.count, 2)
+      history.toggleFavorite(protected)
+      XCTAssertEqual(history.items.count, 1)
+      XCTAssertFalse(history.items.contains(protected))
+      XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItem>()), 1)
+    }
+  }
+
+  private func withHistory(_ verify: (History) async throws -> Void) async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    Self.retainedContainers.append(container)
+    let appState = AppState.shared
+    let savedContainer = Storage.shared.container
+    let savedHistory = appState.history
+    let savedNavigator = appState.navigator
+    let savedPreview = appState.preview
+    let savedNeedsResize = appState.popup.needsResize
+    let savedSize = Defaults[.size]
+    let savedSortBy = Defaults[.sortBy]
+    let savedPinTo = Defaults[.pinTo]
+    let savedPinOrder = Defaults[.pinOrder]
+    let savedSearchMode = Defaults[.searchMode]
+    let savedClearSystemClipboard = Defaults[.clearSystemClipboard]
+    defer {
+      Storage.shared.container = savedContainer
+      appState.history = savedHistory
+      appState.navigator = savedNavigator
+      appState.preview = savedPreview
+      appState.popup.needsResize = savedNeedsResize
+      Defaults[.size] = savedSize
+      Defaults[.sortBy] = savedSortBy
+      Defaults[.pinTo] = savedPinTo
+      Defaults[.pinOrder] = savedPinOrder
+      Defaults[.searchMode] = savedSearchMode
+      Defaults[.clearSystemClipboard] = savedClearSystemClipboard
+    }
+    Storage.shared.container = container
+    Defaults[.size] = 10
+    Defaults[.sortBy] = .lastCopiedAt
+    Defaults[.pinTo] = .top
+    Defaults[.pinOrder] = PinOrder()
+    Defaults[.searchMode] = .exact
+    Defaults[.clearSystemClipboard] = false
+    for (index, text) in ["Alpha favorite", "Beta favorite", "Alpha ordinary", "Alpha pinned"].enumerated() {
+      let item = HistoryItem(contents: [HistoryItemContent(
+        type: NSPasteboard.PasteboardType.string.rawValue, value: Data(text.utf8))])
+      container.mainContext.insert(item)
+      item.title = text
+      item.lastCopiedAt = Date(timeIntervalSince1970: Double(100 - index))
+    }
+    try container.mainContext.save()
+    let history = History()
+    appState.history = history
+    appState.navigator = NavigationManager(history: history, footer: appState.footer)
+    appState.preview = DetachedPreviewController()
+    try await history.load()
+    await Task.yield()
+    try await verify(history)
+    await withCheckedContinuation { continuation in
+      DispatchQueue.main.async { continuation.resume() }
+    }
+  }
+}

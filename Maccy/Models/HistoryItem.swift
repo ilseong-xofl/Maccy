@@ -69,6 +69,7 @@ class HistoryItem {
   var lastCopiedAt: Date = Date.now
   var numberOfCopies: Int = 1
   var pin: String?
+  var isFavorite: Bool = false
   var title = ""
   // Read-only access to a copied image file; separate from the original pasteboard contents.
   var previewImageBookmark: Data?

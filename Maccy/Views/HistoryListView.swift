@@ -45,7 +45,7 @@ struct HistoryListView: View {
     ScrollView {
       ScrollViewReader { proxy in
         LazyVStack(spacing: 0) {
-          if let stack = appState.history.pasteStack,
+          if appState.history.filter == .history, let stack = appState.history.pasteStack,
              !stack.items.isEmpty {
             PasteStackView(stack: stack)
 
@@ -110,6 +110,24 @@ struct HistoryListView: View {
       .contentMargins(.bottom, bottomPadding, for: .scrollIndicators)
     }
     .accessibilityIdentifier("history-scroll-view")
+    .overlay {
+      if pinnedItems.isEmpty && unpinnedItems.isEmpty
+          && (appState.history.filter == .favorites || !searchQuery.isEmpty) {
+        VStack(spacing: 8) {
+          Image(systemName: searchQuery.isEmpty ? "star" : "magnifyingglass")
+            .font(.system(size: 24))
+            .foregroundStyle(searchQuery.isEmpty ? FavoriteAppearance.color : Color.secondary)
+          Text(searchQuery.isEmpty ? "favorites_empty" : "history_search_empty")
+            .font(.system(size: 13, weight: .medium))
+          if searchQuery.isEmpty {
+            Text("favorites_empty_hint")
+              .font(.system(size: 11))
+              .foregroundStyle(.secondary)
+          }
+        }
+        .allowsHitTesting(false)
+      }
+    }
     .onAppear {
       // Pins and the paste stack now scroll with the history; they no longer
       // contribute a fixed minimum height outside the scroll view.

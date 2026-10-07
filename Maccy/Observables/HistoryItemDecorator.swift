@@ -77,6 +77,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     imageSourceByteCount ?? item.contents.reduce(Int64(0)) { $0 + Int64($1.value?.count ?? 0) }
   }
 
+  var isFavorite: Bool { item.isFavorite }
   var isPinned: Bool { item.pin != nil }
   var isUnpinned: Bool { item.pin == nil }
 
@@ -120,6 +121,9 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     }
     if isPinned {
       parts.append(NSLocalizedString("history_item_pinned_accessibility_value", comment: ""))
+    }
+    if isFavorite {
+      parts.append(NSLocalizedString("favorite_accessibility_value", comment: ""))
     }
     if let index = multiSelectionIndex {
       parts.append(

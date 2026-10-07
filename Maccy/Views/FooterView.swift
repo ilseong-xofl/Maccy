@@ -14,6 +14,11 @@ struct FooterView: View {
           .padding(.horizontal, Popup.horizontalSeparatorPadding)
 
         HStack(spacing: 0) {
+          HStack(spacing: 6) {
+            filterBadge(.history, title: "history_filter_history", symbol: "clock")
+            filterBadge(.favorites, title: "history_filter_favorites", symbol: "star.fill")
+          }
+          .padding(.leading, 6)
           Spacer()
           PopupIconButton(symbol: "gearshape", label: "preferences") {
             appState.openPreferences()
@@ -47,6 +52,32 @@ struct FooterView: View {
       }
     }
     .readHeight(appState, into: \.popup.footerHeight)
+  }
+
+  private func filterBadge(_ filter: HistoryFilter, title: LocalizedStringKey, symbol: String) -> some View {
+    let isSelected = appState.history.filter == filter
+    let tint: Color = filter == .favorites ? FavoriteAppearance.color : .secondary
+    return Button {
+      appState.requestKeyboardFocus(.list)
+      appState.history.filter = filter
+    } label: {
+      Label {
+        Text(title).foregroundStyle(Color.primary.opacity(0.85))
+      } icon: {
+        Image(systemName: symbol).foregroundStyle(tint)
+      }
+        .font(.system(size: 11, weight: .medium))
+        .padding(.horizontal, 9)
+        .frame(height: 22)
+        .background(tint.opacity(isSelected ? 0.23 : 0.06), in: Capsule())
+        .overlay(Capsule().strokeBorder(tint.opacity(isSelected ? 0.6 : 0.2), lineWidth: 1))
+        .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .focusable(false)
+    .excludeFromWindowMovableByBackground()
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
+    .accessibilityIdentifier(filter == .favorites ? "filter-favorites" : "filter-history")
   }
 }
 

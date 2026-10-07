@@ -1544,11 +1544,13 @@ class ClipboardItemMouseTests: XCTestCase {
   private var mouseView: WindowDragSpy!
   private var selections: [NSEvent.ModifierFlags] = []
   private var activations: [NSEvent.ModifierFlags] = []
+  private var favoriteToggles = 0
 
   override func setUp() {
     super.setUp()
     selections = []
     activations = []
+    favoriteToggles = 0
     window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 300, height: 100),
       styleMask: .borderless, backing: .buffered, defer: false)
@@ -1659,6 +1661,130 @@ class ClipboardItemMouseTests: XCTestCase {
     XCTAssertFalse(mouseView.mouseDownCanMoveWindow)
   }
 
+  func testFavoriteClickTogglesWithoutSelectingCopyingOrDragging() {
+    enableFavoriteInteraction()
+    let point = NSPoint(x: 13, y: 50)
+    mouseView.mouseDown(with: event(.leftMouseDown, at: point))
+    XCTAssertEqual(favoriteToggles, 0)
+    mouseView.mouseUp(with: event(.leftMouseUp, at: point))
+
+    XCTAssertEqual(favoriteToggles, 1)
+    XCTAssertTrue(selections.isEmpty)
+    XCTAssertTrue(activations.isEmpty)
+    XCTAssertTrue(mouseView.dragEvents.isEmpty)
+  }
+
+  func testDoubleClickOnFavoriteOnlyTogglesTwice() {
+    enableFavoriteInteraction()
+    let point = NSPoint(x: 13, y: 50)
+    for clickCount in [1, 2] {
+      mouseView.mouseDown(with: event(.leftMouseDown, at: point, clickCount: clickCount))
+      mouseView.mouseUp(with: event(.leftMouseUp, at: point, clickCount: clickCount))
+    }
+
+    XCTAssertEqual(favoriteToggles, 2)
+    XCTAssertTrue(selections.isEmpty)
+    XCTAssertTrue(activations.isEmpty)
+    XCTAssertTrue(mouseView.dragEvents.isEmpty)
+  }
+
+  func testFavoriteDragCancelsEvenWhenPointerReturnsToStar() {
+    enableFavoriteInteraction()
+    let point = NSPoint(x: 13, y: 50)
+    mouseView.mouseDown(with: event(.leftMouseDown, at: point))
+    mouseView.mouseDragged(with: event(.leftMouseDragged, at: NSPoint(x: 21, y: 50)))
+    mouseView.mouseDragged(with: event(.leftMouseDragged, at: point))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: point))
+
+    XCTAssertEqual(favoriteToggles, 0)
+    XCTAssertTrue(selections.isEmpty)
+    XCTAssertTrue(activations.isEmpty)
+    XCTAssertTrue(mouseView.dragEvents.isEmpty)
+  }
+
+  func testMinorFavoritePointerJitterStillToggles() {
+    enableFavoriteInteraction()
+    mouseView.mouseDown(with: event(.leftMouseDown, at: NSPoint(x: 13, y: 50)))
+    mouseView.mouseDragged(with: event(.leftMouseDragged, at: NSPoint(x: 15, y: 51)))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: NSPoint(x: 15, y: 51)))
+
+    XCTAssertEqual(favoriteToggles, 1)
+    XCTAssertTrue(selections.isEmpty)
+    XCTAssertTrue(activations.isEmpty)
+    XCTAssertTrue(mouseView.dragEvents.isEmpty)
+  }
+
+  func testReleasingOutsideFavoriteCancelsToggle() {
+    enableFavoriteInteraction()
+    mouseView.mouseDown(with: event(.leftMouseDown, at: NSPoint(x: 13, y: 50)))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: NSPoint(x: 50, y: 50)))
+
+    XCTAssertEqual(favoriteToggles, 0)
+    XCTAssertTrue(selections.isEmpty)
+    XCTAssertTrue(activations.isEmpty)
+  }
+
+  func testFavoriteTargetDoesNotConsumeWholeLeadingColumn() {
+    enableFavoriteInteraction()
+    for point in [NSPoint(x: 13, y: 10), NSPoint(x: 13, y: 90)] {
+      mouseView.mouseDown(with: event(.leftMouseDown, at: point))
+      mouseView.mouseUp(with: event(.leftMouseUp, at: point))
+    }
+
+    XCTAssertEqual(favoriteToggles, 0)
+    XCTAssertEqual(selections.count, 2)
+    XCTAssertTrue(activations.isEmpty)
+  }
+
+  func testLeadingAreaOutsideFavoriteStillDragsWindow() {
+    enableFavoriteInteraction()
+    let original = event(.leftMouseDown, at: NSPoint(x: 13, y: 90))
+    mouseView.mouseDown(with: original)
+    mouseView.mouseDragged(with: event(.leftMouseDragged, at: NSPoint(x: 35, y: 90)))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: NSPoint(x: 35, y: 90)))
+
+    XCTAssertEqual(favoriteToggles, 0)
+    XCTAssertEqual(selections.count, 1)
+    XCTAssertTrue(activations.isEmpty)
+    XCTAssertEqual(mouseView.dragEvents.count, 1)
+    XCTAssertTrue(mouseView.dragEvents.first === original)
+  }
+
+  func testRowsWithoutFavoriteCallbackKeepWholeRowActivation() {
+    let point = NSPoint(x: 13, y: 50)
+    mouseView.mouseDown(with: event(.leftMouseDown, at: point, clickCount: 2))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: point, clickCount: 2))
+
+    XCTAssertEqual(selections.count, 1)
+    XCTAssertEqual(activations.count, 1)
+  }
+
+  func testDoubleClickStartingOutsideButEndingOnFavoriteDoesNotCopy() {
+    enableFavoriteInteraction()
+    mouseView.mouseDown(with: event(.leftMouseDown, at: NSPoint(x: 28, y: 50), clickCount: 2))
+    mouseView.mouseUp(with: event(.leftMouseUp, at: NSPoint(x: 26, y: 50), clickCount: 2))
+
+    XCTAssertEqual(favoriteToggles, 0)
+    XCTAssertEqual(selections.count, 1)
+    XCTAssertTrue(activations.isEmpty)
+  }
+
+  func testRemovingFavoriteActionDuringPressDoesNotActivateRow() {
+    enableFavoriteInteraction()
+    let point = NSPoint(x: 13, y: 50)
+    mouseView.mouseDown(with: event(.leftMouseDown, at: point, clickCount: 2))
+    mouseView.onToggleFavorite = nil
+    mouseView.mouseUp(with: event(.leftMouseUp, at: point, clickCount: 2))
+
+    XCTAssertEqual(favoriteToggles, 0)
+    XCTAssertTrue(selections.isEmpty)
+    XCTAssertTrue(activations.isEmpty)
+  }
+
+  private func enableFavoriteInteraction() {
+    mouseView.onToggleFavorite = { [weak self] in self?.favoriteToggles += 1 }
+  }
+
   private func event(
     _ type: NSEvent.EventType,
     at point: NSPoint = NSPoint(x: 50, y: 50),
@@ -1731,6 +1857,70 @@ class CompactPopupNavigationTests: XCTestCase {
         XCTAssertEqual(navigator.selection.items, [first])
         XCTAssertNil(footer.selectedItem)
       }
+    }
+  }
+
+  func testFavoritesCannotNavigateToHiddenPasteStack() async throws {
+    try await withNavigationFixture { navigator, history, _ in
+      let favorite = try XCTUnwrap(history.firstVisibleItem)
+      favorite.item.isFavorite = true
+      let stack = PasteStack(items: history.items.toArray(), modifierFlags: [])
+      history.pasteStack = stack
+      history.filter = .favorites
+      navigator.select(item: favorite)
+
+      navigator.highlightPrevious()
+
+      XCTAssertEqual(navigator.leadHistoryItem, favorite)
+      XCTAssertEqual(navigator.selection.items, [favorite])
+      XCTAssertFalse(navigator.pasteStackSelected)
+      navigator.selectWithoutScrolling(id: stack.id)
+      XCTAssertNil(navigator.leadSelection)
+      XCTAssertFalse(navigator.pasteStackSelected)
+      XCTAssertTrue(history.pasteStack === stack)
+    }
+  }
+
+  func testEmptyFavoritesLeaveNoHiddenStackSelection() async throws {
+    try await withNavigationFixture { navigator, history, _ in
+      let stack = PasteStack(items: history.items.toArray(), modifierFlags: [])
+      history.pasteStack = stack
+      history.filter = .favorites
+      navigator.select(item: nil)
+
+      navigator.highlightFirst()
+      navigator.highlightPrevious()
+      navigator.highlightNext(allowCycle: true)
+      navigator.highlightLast()
+
+      XCTAssertTrue(history.items.isEmpty)
+      XCTAssertNil(navigator.leadSelection)
+      XCTAssertNil(navigator.leadHistoryItem)
+      XCTAssertTrue(navigator.selection.isEmpty)
+      XCTAssertFalse(navigator.pasteStackSelected)
+      XCTAssertTrue(history.pasteStack === stack)
+      XCTAssertEqual(stack.items.count, 3)
+    }
+  }
+
+  func testReturningToHistoryRestoresPasteStackNavigation() async throws {
+    try await withNavigationFixture { navigator, history, _ in
+      let first = try XCTUnwrap(history.firstVisibleItem)
+      let stack = PasteStack(items: history.items.toArray(), modifierFlags: [])
+      history.pasteStack = stack
+      history.filter = .favorites
+      navigator.select(item: nil)
+      XCTAssertNil(navigator.leadSelection)
+
+      history.filter = .history
+      navigator.select(item: nil)
+      XCTAssertEqual(navigator.leadSelection, stack.id)
+      XCTAssertTrue(navigator.pasteStackSelected)
+      navigator.highlightNext()
+      XCTAssertEqual(navigator.leadHistoryItem, first)
+      navigator.highlightPrevious()
+      XCTAssertEqual(navigator.leadSelection, stack.id)
+      XCTAssertTrue(navigator.pasteStackSelected)
     }
   }
 

@@ -5,6 +5,17 @@ import Defaults
 // swiftlint:disable force_try
 @MainActor
 class HistoryItemTests: XCTestCase {
+  func testFavoriteDefaultsToFalseIndependentlyOfPin() {
+    let item = historyItem("Favorite default")
+    XCTAssertFalse(item.isFavorite)
+    item.pin = "b"
+    XCTAssertFalse(item.isFavorite)
+    item.isFavorite = true
+    XCTAssertEqual(item.pin, "b")
+    item.pin = nil
+    XCTAssertTrue(item.isFavorite)
+  }
+
   func testTitleForString() {
     let title = "foo"
     let item = historyItem(title)

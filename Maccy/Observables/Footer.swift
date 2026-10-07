@@ -30,7 +30,7 @@ class Footer: ItemsContainer {
         help: "clear_tooltip",
         confirmation: .init(
           message: "clear_alert_message",
-          comment: "clear_alert_comment",
+          comment: "clear_regular_alert_comment",
           confirm: "clear_alert_confirm",
           cancel: "clear_alert_cancel"
         ),
@@ -46,7 +46,7 @@ class Footer: ItemsContainer {
         help: "clear_all_tooltip",
         confirmation: .init(
           message: "clear_alert_message",
-          comment: "clear_alert_comment",
+          comment: "clear_all_alert_comment",
           confirm: "clear_alert_confirm",
           cancel: "clear_alert_cancel"
         ),

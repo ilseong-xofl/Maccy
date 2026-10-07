@@ -1,5 +1,5 @@
 "search_placeholder" = "검색어를 입력하세요…";
-"clear_tooltip" = "고정되지 않은 항목들을 지웁니다.\n⇧와 함께 선택시 모두 지웁니다.";
+"clear_tooltip" = "고정 항목과 즐겨찾기를 제외한 기록을 지웁니다.";
 "clear_all_tooltip" = "모든 항목을 지웁니다.";
 "about_tooltip" = "어플리케이션에 관하여 더 보기.";
 "quit_tooltip" = "어플리케이션을 종료합니다.";
@@ -36,3 +36,15 @@
 "history_item_image_count_accessibility_label" = "%ld개 이미지";
 "history_item_image_accessibility_generic" = "이미지";
 "toolbar_remove_paste_stack_action" = "붙여넣기 스택 중지";
+
+// Favorites
+"history_filter_history" = "히스토리";
+"history_filter_favorites" = "즐겨찾기";
+"favorite_add" = "즐겨찾기 추가";
+"favorite_remove" = "즐겨찾기 해제";
+"favorite_accessibility_value" = "즐겨찾기";
+"favorites_empty" = "즐겨찾기가 없습니다.";
+"favorites_empty_hint" = "항목 왼쪽의 별을 눌러 추가하세요.";
+"history_search_empty" = "검색 결과가 없습니다.";
+"clear_regular_alert_comment" = "고정 항목과 즐겨찾기는 보존합니다. 지운 기록은 복구할 수 없습니다.";
+"clear_all_alert_comment" = "고정 항목과 즐겨찾기를 포함한 모든 기록을 지웁니다. 이 작업은 되돌릴 수 없습니다.";

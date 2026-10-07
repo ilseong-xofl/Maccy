@@ -30,6 +30,18 @@
       {
         "key" : "MACCY_MIGRATION_EXPECTED_CONTENTS",
         "value" : "$(MACCY_MIGRATION_EXPECTED_CONTENTS)"
+      },
+      {
+        "key" : "MACCY_FAVORITES_MIGRATION_STORE",
+        "value" : "$(MACCY_FAVORITES_MIGRATION_STORE)"
+      },
+      {
+        "key" : "MACCY_FAVORITES_MIGRATION_EXPECTED_ITEMS",
+        "value" : "$(MACCY_FAVORITES_MIGRATION_EXPECTED_ITEMS)"
+      },
+      {
+        "key" : "MACCY_FAVORITES_MIGRATION_EXPECTED_CONTENTS",
+        "value" : "$(MACCY_FAVORITES_MIGRATION_EXPECTED_CONTENTS)"
       }
     ],
     "targetForVariableExpansion" : {

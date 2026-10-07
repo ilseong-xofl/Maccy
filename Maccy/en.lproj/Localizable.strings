@@ -1,5 +1,5 @@
 "search_placeholder" = "type to search…";
-"clear_tooltip" = "Clear unpinned items.\nSelect with ⇧ to clear all.";
+"clear_tooltip" = "Clear history except pinned items and favorites.";
 "clear_all_tooltip" = "Clear all items.";
 "about_tooltip" = "Read more about the application.";
 "quit_tooltip" = "Quit application.";
@@ -29,3 +29,15 @@
 "history_item_image_count_accessibility_label" = "%ld images";
 "history_item_image_accessibility_generic" = "Image";
 "toolbar_remove_paste_stack_action" = "Stop paste stack";
+
+// Favorites
+"history_filter_history" = "History";
+"history_filter_favorites" = "Favorites";
+"favorite_add" = "Add to favorites";
+"favorite_remove" = "Remove from favorites";
+"favorite_accessibility_value" = "Favorite";
+"favorites_empty" = "No favorites yet";
+"favorites_empty_hint" = "Click the star beside an item to add it.";
+"history_search_empty" = "No matching items";
+"clear_regular_alert_comment" = "Pinned items and favorites will be kept. Deleted history cannot be recovered.";
+"clear_all_alert_comment" = "All history, including pinned items and favorites, will be deleted. This cannot be undone.";

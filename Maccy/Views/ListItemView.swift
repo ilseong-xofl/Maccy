@@ -1,6 +1,10 @@
 import Defaults
 import SwiftUI
 
+enum FavoriteAppearance {
+  static let color = Color(red: 0.95, green: 0.68, blue: 0.18)
+}
+
 enum SelectionAppearance {
   case none
   case topConnection
@@ -43,6 +47,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   var shortcuts: [KeyShortcut]
   var isSelected: Bool
   var isPinned: Bool = false
+  var isFavorite: Bool? = nil
   var selectionIndex: Int?
   var help: LocalizedStringKey?
   var selectionAppearance: SelectionAppearance = .none
@@ -66,7 +71,15 @@ struct ListItemView<Title: View, ID: Hashable>: View {
 
   var body: some View {
     HStack(spacing: 0) {
-      if showIcons, let appIcon {
+      if let isFavorite {
+        Image(systemName: isFavorite ? "star.fill" : "star")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundStyle(isFavorite ? FavoriteAppearance.color : Color.secondary)
+          .frame(width: 15, height: 15)
+          .padding(.leading, accessoryEdgePadding)
+          .padding(.trailing, accessoryContentSpacing)
+          .accessibilityHidden(true)
+      } else if showIcons, let appIcon {
         VStack {
           Spacer(minLength: 0)
           AppImageView(appImage: appIcon, size: NSSize(width: 15, height: 15))

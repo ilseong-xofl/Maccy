@@ -8,12 +8,29 @@ import Sauce
 import Settings
 import SwiftData
 
+enum HistoryFilter: String, CaseIterable, Identifiable {
+  case history
+  case favorites
+
+  var id: Self { self }
+}
+
 @Observable
 class History: ItemsContainer { // swiftlint:disable:this type_body_length
   static let shared = History()
   let logger = Logger(label: "org.p0deje.Maccy")
 
   var pasteStack: PasteStack?
+
+  // A view choice for this session; neither stored items nor pin order change with it.
+  var filter: HistoryFilter = .history {
+    didSet {
+      guard filter != oldValue else { return }
+      updateSearchResults()
+      AppState.shared.reconcileHistoryVisibility(in: self)
+      AppState.shared.popup.needsResize = true
+    }
+  }
 
   var items: ConcatenatedCollection<HistoryItemDecorator> {
     switch Defaults[.pinTo] {
@@ -24,15 +41,16 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     }
   }
   var pinnedItems: [HistoryItemDecorator] {
-    searchQuery.isEmpty ? allPinnedItems : filteredPinnedItems
+    matchingFilter(searchQuery.isEmpty ? allPinnedItems : filteredPinnedItems)
   }
   var unpinnedItems: [HistoryItemDecorator] {
-    searchQuery.isEmpty ? allUnpinnedItems : filteredUnpinnedItems
+    matchingFilter(searchQuery.isEmpty ? allUnpinnedItems : filteredUnpinnedItems)
   }
   var availablePins: [String] { pinManager.availablePins }
 
   var firstPinnedItem: HistoryItemDecorator? { pinnedItems.first }
   var firstUnpinnedItem: HistoryItemDecorator? { unpinnedItems.first }
+  var firstUnfilteredUnpinnedItem: HistoryItemDecorator? { allUnpinnedItems.first }
 
   var searchQuery: String = "" {
     didSet(previousSearchQuery) {
@@ -128,9 +146,14 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     return ShortcutActivation(item: item, action: action)
   }
 
+  func canActivateShortcut(_ shortcut: ShortcutActivation) -> Bool {
+    shortcut.item.isUnpinned && shortcut.item.isVisible && items.contains(shortcut.item)
+      && shortcut.action != .unknown
+  }
+
   @MainActor
   func activateShortcut(_ shortcut: ShortcutActivation) {
-    guard shortcut.item.isUnpinned, shortcut.action != .unknown else { return }
+    guard canActivateShortcut(shortcut) else { return }
     AppState.shared.popup.close()
     Clipboard.shared.copy(shortcut.item.item, removeFormatting: shortcut.removesFormatting)
     if shortcut.pastes { Clipboard.shared.paste() }
@@ -181,7 +204,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     Task {
       for await _ in Defaults.updates(.showSpecialSymbols, initial: false) {
-        for item in items {
+        for item in allPinnedItems + allUnpinnedItems {
           await updateTitle(item: item, title: item.item.generateTitle())
         }
       }
@@ -202,6 +225,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     limitHistorySize(to: Defaults[.size])
 
+    updateSearchResults()
     updateShortcuts()
     // Ensure that panel size is proper *after* loading all items.
     Task {
@@ -211,9 +235,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   @MainActor
   private func limitHistorySize(to maxSize: Int) {
-    if allUnpinnedItems.count >= maxSize {
-      allUnpinnedItems[maxSize...].forEach(delete)
-    }
+    // Favorites, like pins, are kept outside the automatic history quota.
+    let ordinaryItems = allUnpinnedItems.filter { !$0.isFavorite }
+    ordinaryItems.dropFirst(max(0, maxSize)).forEach(delete)
   }
 
   @MainActor
@@ -247,6 +271,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       item.firstCopiedAt = existingHistoryItem.firstCopiedAt
       item.numberOfCopies += existingHistoryItem.numberOfCopies
       item.pin = existingHistoryItem.pin
+      item.isFavorite = item.isFavorite || existingHistoryItem.isFavorite
       item.title = existingHistoryItem.title
       if !item.fromMaccy {
         item.application = existingHistoryItem.application
@@ -275,7 +300,8 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     // Remove exceeding items. Do this after the item is added to avoid removing something
     // if a duplicate was found as then the size already stayed the same.
-    limitHistorySize(to: item.pin == nil ? Defaults[.size] - 1 : Defaults[.size])
+    let reservesHistorySlot = item.pin == nil && !item.isFavorite
+    limitHistorySize(to: Defaults[.size] - (reservesHistorySlot ? 1 : 0))
 
     sessionLog[Clipboard.shared.changeCount] = item
 
@@ -298,14 +324,14 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       updateSearchResults()
     }
     AppState.shared.popup.needsResize = true
-    if item.linkPreviewSnapshot != nil {
-      // Commit the snapshot handoff and old-row deletion before add returns.
+    if item.linkPreviewSnapshot != nil || item.isFavorite {
+      // Commit protected state and the duplicate handoff before add returns.
       let context = Storage.shared.context
       context.processPendingChanges()
       do {
         try context.save()
       } catch {
-        logger.error("Failed to save inherited link preview snapshot")
+        logger.error("Failed to save inherited clipboard item state.")
       }
     }
     return itemDecorator
@@ -327,28 +353,35 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   @MainActor
   func clear() {
     withLogging("Clearing history") {
-      allUnpinnedItems.forEach { item in
+      allUnpinnedItems.filter { !$0.isFavorite }.forEach { item in
         Self.invalidateLinkPreview(of: item.item, sourceURL: item.item.linkPreviewSourceURL)
         cleanup(item)
       }
-      allUnpinnedItems.removeAll()
-      filteredUnpinnedItems.removeAll()
-      sessionLog.removeValues { $0.pin == nil }
+      allUnpinnedItems.removeAll { !$0.isFavorite }
+      filteredUnpinnedItems.removeAll { !$0.isFavorite }
+      sessionLog.removeValues { $0.pin == nil && !$0.isFavorite }
 
       try? Storage.shared.context.transaction {
+        // SQL comparisons through a nil relationship do not match orphaned contents.
+        try? Storage.shared.context.delete(
+          model: HistoryItemContent.self,
+          where: #Predicate { $0.item == nil }
+        )
         try? Storage.shared.context.delete(
           model: HistoryItem.self,
-          where: #Predicate { $0.pin == nil }
+          where: #Predicate { $0.pin == nil && !$0.isFavorite }
         )
         try? Storage.shared.context.delete(
           model: HistoryItemContent.self,
-          where: #Predicate { $0.item?.pin == nil }
+          where: #Predicate { $0.item?.pin == nil && $0.item?.isFavorite == false }
         )
       }
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
     }
 
+    updateSearchResults()
+    AppState.shared.reconcileHistoryVisibility(in: self)
     Clipboard.shared.clear()
     AppState.shared.popup.close()
     Task {
@@ -391,6 +424,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       try? Storage.shared.context.save()
     }
 
+    AppState.shared.reconcileHistoryVisibility(in: self)
     Clipboard.shared.clear()
     AppState.shared.popup.close()
     Task {
@@ -416,6 +450,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     sessionLog.removeValues { $0 == item.item }
 
     updateUnpinnedShortcuts()
+    AppState.shared.reconcileHistoryVisibility(in: self)
     Task {
       AppState.shared.popup.needsResize = true
     }
@@ -591,14 +626,31 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       allUnpinnedItems.removeAll { $0 == item }
     }
 
+    limitHistorySize(to: Defaults[.size])
     clearSearchPreservingSelection()
     updateShortcuts()
-    AppState.shared.navigator.scrollTarget = item.id
+    AppState.shared.reconcileHistoryVisibility(in: self)
+    if items.contains(item) { AppState.shared.navigator.scrollTarget = item.id }
     do {
       try item.item.modelContext?.save()
     } catch {
       logger.error("Failed to save clipboard item pin state.")
     }
+  }
+
+  @MainActor
+  func toggleFavorite(_ item: HistoryItemDecorator?) {
+    guard let item, firstStoredItem(where: { $0.id == item.id }) != nil else { return }
+    item.item.isFavorite.toggle()
+    do {
+      try item.item.modelContext?.save()
+    } catch {
+      logger.error("Failed to save clipboard item favorite state.")
+    }
+    limitHistorySize(to: Defaults[.size])
+    updateSearchResults()
+    AppState.shared.reconcileHistoryVisibility(in: self)
+    AppState.shared.popup.needsResize = true
   }
 
   private func clearSearchPreservingSelection() {
@@ -609,7 +661,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   @MainActor
   func movePin(from source: IndexSet, to destination: Int) {
-    guard searchQuery.isEmpty else { return }
+    guard filter == .history, searchQuery.isEmpty else { return }
     pinManager.move(from: source, to: destination)
   }
 
@@ -640,6 +692,10 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     }
 
     return nil
+  }
+
+  private func matchingFilter(_ candidates: [HistoryItemDecorator]) -> [HistoryItemDecorator] {
+    filter == .favorites ? candidates.filter(\.isFavorite) : candidates
   }
 
   private func updateSearchResults() {
@@ -690,7 +746,8 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   private func updateUnpinnedShortcuts() {
     let shortcutItems = unpinnedItems.filter(\.isVisible)
-    for item in shortcutItems {
+    // Hidden search/filter results must not retain an earlier numeric binding.
+    for item in allUnpinnedItems {
       item.shortcuts = []
     }
 

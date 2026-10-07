@@ -26,6 +26,26 @@ class AppState: Sendable {
     keyboardFocusRequestID = UUID()
   }
 
+  @MainActor
+  func reconcileHistoryVisibility(in history: History) {
+    guard self.history === history else { return }
+    let visibleItems = history.items.filter(\.isVisible)
+    let remainingSelection = navigator.selection.items.filter { visibleItems.contains($0) }
+    let currentLead = navigator.leadHistoryItem
+    if remainingSelection.count != navigator.selection.count
+        || currentLead == nil || !visibleItems.contains(where: { $0 == currentLead }) {
+      let next = remainingSelection.first ?? visibleItems.first
+      navigator.isManualMultiSelect = false
+      navigator.select(item: next)
+    }
+    if visibleItems.isEmpty {
+      navigator.select(item: nil)
+      preview.close()
+    } else {
+      preview.selectionDidChange()
+    }
+  }
+
   var isEditingItem: Bool = false
   var isConfirmingQuit = false
   var suppressPopupAutoClose: Bool {
@@ -42,7 +62,7 @@ class AppState: Sendable {
   }
 
   var menuIconText: String {
-    var title = history.firstUnpinnedItem?.text.shortened(to: 100)
+    var title = history.firstUnfilteredUnpinnedItem?.text.shortened(to: 100)
       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     title.unicodeScalars.removeAll(where: CharacterSet.newlines.contains)
     return title.shortened(to: 20)
@@ -76,6 +96,7 @@ class AppState: Sendable {
         item.action()
       }
     } else {
+      guard !history.searchQuery.isEmpty else { return }
       Clipboard.shared.copyInMaccy(history.searchQuery)
       history.searchQuery = ""
     }
