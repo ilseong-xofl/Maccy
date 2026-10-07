@@ -1588,6 +1588,97 @@ class ClipboardItemMouseTests: XCTestCase {
 }
 
 @MainActor
+class CompactPopupNavigationTests: XCTestCase {
+  func testDownAtLastHistoryItemDoesNotSelectRemovedFooterRows() async throws {
+    try await withNavigationFixture { navigator, history, footer in
+      let last = try XCTUnwrap(history.lastVisibleItem)
+      for showFooter in [true, false] {
+        Defaults[.showFooter] = showFooter
+        navigator.select(item: last)
+
+        navigator.highlightNext()
+
+        XCTAssertEqual(navigator.leadHistoryItem, last, "showFooter = \(showFooter)")
+        XCTAssertEqual(navigator.selection.items, [last])
+        XCTAssertNil(footer.selectedItem)
+      }
+    }
+  }
+
+  func testPageDownStopsAtLastHistoryItemWithoutEnteringRemovedFooter() async throws {
+    try await withNavigationFixture { navigator, history, footer in
+      let first = try XCTUnwrap(history.firstVisibleItem)
+      let last = try XCTUnwrap(history.lastVisibleItem)
+      for showFooter in [true, false] {
+        Defaults[.showFooter] = showFooter
+        navigator.select(item: first)
+
+        navigator.highlightLast()
+        XCTAssertEqual(navigator.leadHistoryItem, last)
+        navigator.highlightLast()
+
+        XCTAssertEqual(navigator.leadHistoryItem, last, "showFooter = \(showFooter)")
+        XCTAssertEqual(navigator.selection.items, [last])
+        XCTAssertNil(footer.selectedItem)
+      }
+    }
+  }
+
+  func testShortcutCycleWrapsFromLastHistoryItemToFirstWithEitherFooterPreference() async throws {
+    try await withNavigationFixture { navigator, history, footer in
+      let first = try XCTUnwrap(history.firstVisibleItem)
+      let last = try XCTUnwrap(history.lastVisibleItem)
+      for showFooter in [true, false] {
+        Defaults[.showFooter] = showFooter
+        navigator.select(item: last)
+
+        navigator.highlightNext(allowCycle: true)
+
+        XCTAssertEqual(navigator.leadHistoryItem, first, "showFooter = \(showFooter)")
+        XCTAssertEqual(navigator.selection.items, [first])
+        XCTAssertNil(footer.selectedItem)
+      }
+    }
+  }
+
+  private func withNavigationFixture(
+    _ verify: (NavigationManager, History, Footer) throws -> Void
+  ) async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let appState = AppState.shared
+    let savedContainer = Storage.shared.container
+    let savedPreview = appState.preview
+    let savedNeedsResize = appState.popup.needsResize
+    let savedShowFooter = Defaults[.showFooter]
+    let savedSize = Defaults[.size]
+    defer {
+      Storage.shared.container = savedContainer
+      appState.preview = savedPreview
+      appState.popup.needsResize = savedNeedsResize
+      Defaults[.showFooter] = savedShowFooter
+      Defaults[.size] = savedSize
+    }
+    Storage.shared.container = container
+    appState.preview = DetachedPreviewController()
+    Defaults[.size] = 10
+    for text in ["First navigation fixture", "Second navigation fixture", "Third navigation fixture"] {
+      let item = HistoryItem(contents: [HistoryItemContent(
+        type: NSPasteboard.PasteboardType.string.rawValue, value: Data(text.utf8))])
+      container.mainContext.insert(item)
+      item.title = text
+    }
+    try container.mainContext.save()
+    let history = History()
+    try await history.load()
+    // Drain load's layout update before restoring the shared popup state.
+    await Task.yield()
+    let footer = Footer()
+    try verify(NavigationManager(history: history, footer: footer), history, footer)
+  }
+}
+
+@MainActor
 class ExplicitSearchKeyboardTests: XCTestCase {
   func testRepeatedExplicitFocusRequestsAreDelivered() {
     let appState = AppState.shared

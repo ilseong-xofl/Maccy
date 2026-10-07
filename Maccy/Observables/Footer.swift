@@ -17,11 +17,9 @@ class Footer: ItemsContainer {
     set: { Defaults[.suppressClearAlert] = $0 }
   )
 
-  private var showFooter: Bool {
-    return Defaults[.showFooter]
-  }
+  // Commands now live in the toolbar/context menu, not selectable list rows.
   var containerVisible: Bool {
-    return showFooter
+    return false
   }
 
   init() { // swiftlint:disable:this function_body_length

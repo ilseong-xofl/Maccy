@@ -342,7 +342,8 @@ class MaccyUITests: XCTestCase {
     popUpWithMouse()
     scrollIntoViewIfNeeded(items[copy2].firstMatch)
     pin(copy2)
-    hoverAndClick(app.buttons["Clear"].firstMatch)
+    app.buttons["popup-settings"].rightClick()
+    app.menuItems["Clear"].click()
     confirmClear()
     popUpWithMouse()
     assertNotExists(items[copy1])
@@ -352,7 +353,7 @@ class MaccyUITests: XCTestCase {
   func testClearDuringSearch() {
     popUpWithMouse()
     search(copy2)
-    hoverAndClick(app.buttons["Clear"].firstMatch)
+    app.typeKey(.delete, modifierFlags: [.command, .option])
     confirmClear()
     popUpWithMouse()
     assertNotExists(items[copy1])
@@ -363,9 +364,8 @@ class MaccyUITests: XCTestCase {
     popUpWithMouse()
     scrollIntoViewIfNeeded(items[copy2].firstMatch)
     pin(copy2)
-    XCUIElement.perform(withKeyModifiers: [.shift]) {
-      hoverAndClick(app.buttons["Clear all"].firstMatch)
-    }
+    app.buttons["popup-settings"].rightClick()
+    app.menuItems["Clear all"].click()
     confirmClear()
     popUpWithMouse()
     assertNotExists(items[copy1])

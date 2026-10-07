@@ -12,7 +12,7 @@ struct SearchFieldView: View {
       RoundedRectangle(cornerRadius: Popup.cornerRadius, style: .continuous)
         .fill(Color.secondary)
         .opacity(0.1)
-        .frame(height: 23)
+        .frame(height: 26)
 
       HStack {
         Image(systemName: "magnifyingglass")

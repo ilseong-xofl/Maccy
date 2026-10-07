@@ -229,9 +229,6 @@ struct AppearanceSettingsPane: View {
           .controlSize(.small)
           .accessibilityLabel(Text("ShowSearchField", tableName: "AppearanceSettings"))
         }
-        Defaults.Toggle(key: .showTitle) {
-          Text("ShowTitleBeforeSearchField", tableName: "AppearanceSettings")
-        }
         Defaults.Toggle(key: .showApplicationIcons) {
           Text("ShowApplicationIcons", tableName: "AppearanceSettings")
         }

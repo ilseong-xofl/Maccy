@@ -43,7 +43,6 @@ struct ContentView: View {
             .focusable()
             .focusEffectDisabled()
             .focused($keyboardFocus, equals: .list)
-            .accessibilityIdentifier("clipboard-list-keyboard-focus")
           }
           .frame(minHeight: 0)
           .layoutPriority(1)
@@ -54,6 +53,10 @@ struct ContentView: View {
         try? await appState.history.load()
         keyboardFocus = .list
       }
+    }
+    .overlay(alignment: .bottomTrailing) {
+      WindowResizeIndicator()
+        .padding(3)
     }
     .animation(.easeInOut(duration: 0.2), value: appState.searchVisible)
     .environment(appState)

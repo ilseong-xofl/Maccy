@@ -40,5 +40,5 @@
 "ShowApplicationIcons" = "Show application icons";
 "ShowHexColorSwatch" = "Show hex color swatch";
 "ShowHexColorSwatchTooltip" = "Show color swatch next to hex color codes.";
-"ShowFooter" = "Show footer";
+"ShowFooter" = "Show bottom toolbar";
 "OpenPreferencesWarning" = "⚠️ Press ⌘, (command+comma) to open preferences when footer is hidden.";

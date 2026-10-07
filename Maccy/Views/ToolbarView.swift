@@ -40,9 +40,11 @@ struct ToolbarButton<Label: View>: View {
   var body: some View {
     Button(action: action) {
       label()
+        .frame(minWidth: 22, minHeight: 26)
+        .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .frame(height: 23)
+    .focusable(false)
     .excludeFromWindowMovableByBackground()
   }
 
@@ -65,6 +67,7 @@ struct ToolbarButton<Label: View>: View {
 }
 
 struct ToolbarView: View {
+  var compact = false
   @State private var appState = AppState.shared
   @State private var editingItem: HistoryItemDecorator?
 
@@ -75,12 +78,14 @@ struct ToolbarView: View {
   }
 
   private var shouldUnpin: Bool {
-    return appState.navigator.selection.items.allSatisfy { $0.isPinned }
+    return !appState.navigator.selection.isEmpty
+      && appState.navigator.selection.items.allSatisfy { $0.isPinned }
   }
 
   private var pinActionDisabled: Bool {
-    return appState.navigator.selection.items.contains { $0.isPinned }
-      && appState.navigator.selection.items.contains { !$0.isPinned }
+    return appState.navigator.selection.isEmpty
+      || (appState.navigator.selection.items.contains { $0.isPinned }
+          && appState.navigator.selection.items.contains { !$0.isPinned })
   }
 
   private var selectedImageItem: HistoryItemDecorator? {
@@ -114,19 +119,23 @@ struct ToolbarView: View {
   }
 
   var body: some View {
-    HStack {
-      if !appState.navigator.selection.isEmpty {
-        Spacer()
+    HStack(spacing: compact ? 3 : 8) {
+      if compact || !appState.navigator.selection.isEmpty {
+        if !compact { Spacer() }
 
-        if selectedImageItem != nil {
+        if compact || selectedImageItem != nil {
           ToolbarButton {
-            guard let selectedImageText else { return }
+            guard let selectedImageText else {
+              NSSound.beep()
+              return
+            }
             Clipboard.shared.copyInMaccy(selectedImageText)
           } label: {
             Image(systemName: "text.viewfinder")
           }
           .shortcutKeyHelp(key: "CopyExtractedText", tableName: "PreviewItemView")
-          .disabled(selectedImageText == nil)
+          .disabled(compact ? selectedImageItem == nil : selectedImageText == nil)
+          .accessibilityIdentifier("extract-text")
         }
 
         ToolbarButton {
@@ -134,7 +143,7 @@ struct ToolbarView: View {
             appState.togglePin()
           }
         } label: {
-          if (appState.navigator.selection.items.allSatisfy { $0.isPinned }) {
+          if shouldUnpin {
             Image(systemName: "pin.slash.fill")
           } else {
             Image(systemName: "pin")
@@ -147,6 +156,7 @@ struct ToolbarView: View {
           replacementKey: "pinKey"
         )
         .disabled(pinActionDisabled)
+        .accessibilityIdentifier("pin-item")
 
         ToolbarButton {
           appState.isEditingItem = true
@@ -159,7 +169,12 @@ struct ToolbarView: View {
         .accessibilityIdentifier("edit-item")
 
         ToolbarButton {
-          appState.deleteSelection()
+          if appState.navigator.pasteStackSelected {
+            appState.removePasteStack()
+          } else {
+            appState.deleteSelection()
+          }
+          if compact { appState.requestKeyboardFocus(.list) }
         } label: {
           Image(systemName: "trash")
         }
@@ -169,9 +184,11 @@ struct ToolbarView: View {
           tableName: "PreviewItemView",
           replacementKey: "deleteKey"
         )
+        .disabled(appState.navigator.selection.isEmpty && !appState.navigator.pasteStackSelected)
+        .accessibilityIdentifier("delete-item")
       }
 
-      if appState.navigator.pasteStackSelected {
+      if !compact && appState.navigator.pasteStackSelected {
         ToolbarButton {
           appState.removePasteStack()
         } label: {
