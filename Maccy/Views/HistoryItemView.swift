@@ -75,7 +75,6 @@ struct HistoryItemView: View {
       attributedTitle: item.attributedTitle,
       shortcuts: item.shortcuts,
       isSelected: item.isSelected,
-      isPinned: item.isPinned,
       selectionIndex: item.multiSelectionIndex,
       selectionAppearance: selectionAppearance,
       accessibilityLabel: linkAccessibilityLabel,

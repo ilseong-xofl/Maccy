@@ -54,21 +54,87 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     }
   }
 
-  var pressedShortcutItem: HistoryItemDecorator? {
-    guard let event = NSApp.currentEvent else {
-      return nil
+  struct ShortcutInputContext {
+    var isSearchFocused = false
+    var isEditingItem = false
+    var isEditableText = false
+    var hasMarkedText = false
+    var hasModal = false
+
+    var acceptsRowShortcuts: Bool { allowsRowShortcuts(modifiers: []) }
+
+    func allowsRowShortcuts(modifiers: NSEvent.ModifierFlags) -> Bool {
+      guard !isEditingItem, !hasMarkedText, !hasModal else { return false }
+      // Search accepts typed digits but retains its existing modified result shortcuts.
+      if isSearchFocused { return !modifiers.isEmpty }
+      return !isEditableText
     }
 
-    let modifierFlags = event.modifierFlags
-      .intersection(.deviceIndependentFlagsMask)
-      .subtracting(.capsLock)
-
-    guard HistoryItemAction(modifierFlags) != .unknown else {
-      return nil
+    @MainActor
+    static func current(in window: NSWindow?, searchFocused: Bool = false) -> Self {
+      let appState = AppState.shared
+      let responder = window?.firstResponder
+      let editable = (responder as? NSTextView)?.isEditable == true
+        || (responder as? NSTextField)?.isEditable == true
+      return Self(
+        isSearchFocused: searchFocused,
+        isEditingItem: appState.isEditingItem,
+        isEditableText: editable,
+        hasMarkedText: (responder as? NSTextInputClient)?.hasMarkedText() == true,
+        hasModal: appState.isConfirmingQuit || NSApp.modalWindow != nil || window?.attachedSheet != nil
+          || appState.appDelegate?.panel.attachedSheet != nil
+          || appState.footer.items.contains { $0.showConfirmation }
+      )
     }
+  }
 
-    let key = Sauce.shared.key(for: Int(event.keyCode))
-    return items.first { $0.shortcuts.contains(where: { $0.key == key }) }
+  struct ShortcutActivation {
+    let item: HistoryItemDecorator
+    let action: HistoryItemAction
+
+    var removesFormatting: Bool { action == .pasteWithoutFormatting }
+    var pastes: Bool { action == .paste || action == .pasteWithoutFormatting }
+  }
+
+  /// Resolve the event while its key, modifiers and focus still describe the key press.
+  @MainActor
+  func shortcutActivation(for event: NSEvent?, context: ShortcutInputContext) -> ShortcutActivation? {
+    guard let event, event.type == .keyDown else { return nil }
+    let flags = KeyShortcut.normalizedModifiers(event.modifierFlags)
+    guard context.allowsRowShortcuts(modifiers: flags) else { return nil }
+    let key: Key?
+    let action: HistoryItemAction
+    if flags.isEmpty {
+      guard let character = event.characters, KeyShortcut.isCopyDigit(character) else { return nil }
+      // Keypad keys have separate virtual key codes but copy the same numbered row.
+      key = Key(character: character, virtualKeyCode: nil)
+      action = .copy
+    } else {
+      action = HistoryItemAction(flags)
+      guard action != .unknown else { return nil }
+      if event.modifierFlags.contains(.numericPad),
+         let character = event.charactersIgnoringModifiers, KeyShortcut.isCopyDigit(character) {
+        key = Key(character: character, virtualKeyCode: nil)
+      } else if KeyboardLayout.current.commandSwitchesToQWERTY && flags.contains(.command) {
+        key = Key(QWERTYKeyCode: Int(event.keyCode))
+      } else {
+        key = Sauce.shared.key(for: Int(event.keyCode))
+      }
+    }
+    guard let key, let item = items.first(where: { item in
+      item.isVisible && (!flags.isEmpty || item.isUnpinned)
+        && item.shortcuts.contains { $0.key == key && $0.modifierFlags == flags }
+    }) else { return nil }
+    return ShortcutActivation(item: item, action: action)
+  }
+
+  @MainActor
+  func activateShortcut(_ shortcut: ShortcutActivation) {
+    guard shortcut.action != .unknown else { return }
+    AppState.shared.popup.close()
+    Clipboard.shared.copy(shortcut.item.item, removeFormatting: shortcut.removesFormatting)
+    if shortcut.pastes { Clipboard.shared.paste() }
+    Task { searchQuery = "" }
   }
 
   private let search = Search()

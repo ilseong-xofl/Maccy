@@ -1,6 +1,7 @@
 import XCTest
 import Defaults
 import SwiftData
+import Sauce
 @testable import Maccy
 
 @MainActor
@@ -747,5 +748,200 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
     item.title = item.generateTitle()
 
     return item
+  }
+}
+
+
+@MainActor
+final class NumericClipboardShortcutTests: XCTestCase {
+  func testNumericLabelHasOnePlainDefaultWhileModifiedAndPinnedShortcutsRemain() throws {
+    let shortcuts = KeyShortcut.create(character: "1")
+    let visible = shortcuts.filter { $0.isVisible(shortcuts, [.capsLock, .numericPad]) }
+    XCTAssertEqual(visible.count, 1)
+    XCTAssertEqual(visible.first?.modifierFlags, [])
+    XCTAssertFalse(try XCTUnwrap(visible.first).description.contains("⌘"))
+    for flags: NSEvent.ModifierFlags in [[.command], [.option]] {
+      let modified = shortcuts.filter { $0.isVisible(shortcuts, flags) }
+      XCTAssertEqual(modified.count, 1)
+      XCTAssertEqual(modified.first?.modifierFlags, flags)
+    }
+    let pinned = KeyShortcut.create(character: "b")
+    XCTAssertFalse(pinned.contains { $0.modifierFlags.isEmpty })
+    XCTAssertEqual(pinned.filter { $0.isVisible(pinned, []) }.first?.modifierFlags, [.command])
+  }
+
+  func testPlainDigitsAlwaysCopyOriginalFormatsForEveryDefaultCombination() async throws {
+    try await withHistory { history in
+      for paste in [false, true] {
+        for removeFormatting in [false, true] {
+          Defaults[.pasteByDefault] = paste
+          Defaults[.removeFormattingByDefault] = removeFormatting
+          let expected = try XCTUnwrap(history.firstUnpinnedItem)
+          let originalContents = expected.item.contents.map { ($0.type, $0.value) }
+          let activation = try XCTUnwrap(history.shortcutActivation(for: keyEvent("1"), context: .init()))
+          XCTAssertEqual(activation.item.id, expected.id)
+          XCTAssertEqual(activation.action, .copy)
+          XCTAssertFalse(activation.pastes)
+          XCTAssertFalse(activation.removesFormatting)
+          XCTAssertEqual(expected.item.contents.map(\.type), originalContents.map(\.0))
+          XCTAssertEqual(expected.item.contents.map(\.value), originalContents.map(\.1))
+          XCTAssertEqual(Set(expected.item.contents.map(\.type)), Set([
+            NSPasteboard.PasteboardType.string.rawValue, NSPasteboard.PasteboardType.html.rawValue
+          ]))
+        }
+      }
+    }
+  }
+
+  func testDigitsOneThroughNineResolveUnpinnedRowsEvenWhenPinIsFirst() async throws {
+    try await withHistory { history in
+      XCTAssertTrue(try XCTUnwrap(history.firstVisibleItem).isPinned)
+      for digit in 1...9 {
+        let activation = try XCTUnwrap(history.shortcutActivation(for: keyEvent(String(digit)), context: .init()))
+        XCTAssertEqual(activation.item.id, history.unpinnedItems[digit - 1].id)
+      }
+      XCTAssertTrue(history.unpinnedItems[9].shortcuts.isEmpty)
+      XCTAssertNil(history.shortcutActivation(for: keyEvent("0"), context: .init()))
+      history.unpinnedItems[0].isVisible = false
+      XCTAssertNil(history.shortcutActivation(for: keyEvent("1"), context: .init()))
+    }
+  }
+
+  func testKeypadAndCapsLockCopyTheSameRow() async throws {
+    try await withHistory { history in
+      let event = keyEvent("1", flags: [.numericPad, .capsLock, .function], keyCode: 83)
+      let activation = try XCTUnwrap(history.shortcutActivation(for: event, context: .init()))
+      XCTAssertEqual(activation.item.id, history.firstUnpinnedItem?.id)
+      XCTAssertEqual(activation.action, .copy)
+      let modified = try XCTUnwrap(history.shortcutActivation(
+        for: keyEvent("1", flags: [.command, .numericPad, .capsLock], keyCode: 83), context: .init()))
+      XCTAssertEqual(modified.item.id, activation.item.id)
+      XCTAssertEqual(modified.action, HistoryItemAction(.command))
+    }
+  }
+
+  func testTypingContextsDoNotActivatePlainNumericShortcuts() async throws {
+    try await withHistory { history in
+      let contexts: [History.ShortcutInputContext] = [
+        .init(isSearchFocused: true), .init(isEditingItem: true), .init(isEditableText: true),
+        .init(hasMarkedText: true), .init(hasModal: true),
+        .init(isSearchFocused: true, isEditableText: true, hasMarkedText: true)
+      ]
+      for context in contexts {
+        XCTAssertNil(history.shortcutActivation(for: keyEvent("1"), context: context))
+      }
+      // Modifier-independent input modes must also reject the older shortcuts.
+      for context in contexts.dropFirst() {
+        XCTAssertNil(history.shortcutActivation(for: keyEvent("1", flags: [.command]), context: context))
+      }
+    }
+  }
+
+  func testSearchAllowsLegacyModifiedShortcutsWhileKeepingTypedNumbers() async throws {
+    try await withHistory { history in
+      let context = History.ShortcutInputContext(isSearchFocused: true, isEditableText: true)
+      XCTAssertNil(history.shortcutActivation(for: keyEvent("1"), context: context))
+      for flags: NSEvent.ModifierFlags in [[.command], [.option], [.option, .shift]] {
+        let activation = try XCTUnwrap(history.shortcutActivation(for: keyEvent("1", flags: flags), context: context))
+        XCTAssertEqual(activation.item.id, history.firstUnpinnedItem?.id)
+        XCTAssertEqual(activation.action, HistoryItemAction(flags))
+      }
+    }
+  }
+
+  func testPinnedLettersStillRequireTheirExistingModifiers() async throws {
+    try await withHistory { history in
+      XCTAssertNil(history.shortcutActivation(for: keyEvent("b"), context: .init()))
+      for flags: NSEvent.ModifierFlags in [[.command], [.option]] {
+        let activation = try XCTUnwrap(history.shortcutActivation(for: keyEvent("b", flags: flags), context: .init()))
+        XCTAssertEqual(activation.item.id, history.firstPinnedItem?.id)
+        XCTAssertEqual(activation.action, HistoryItemAction(flags))
+      }
+    }
+  }
+
+  func testResolvedActionDoesNotChangeAfterModifiersOrDefaultsChange() async throws {
+    try await withHistory { history in
+      let copy = try XCTUnwrap(history.shortcutActivation(for: keyEvent("1", flags: [.command]), context: .init()))
+      let paste = try XCTUnwrap(history.shortcutActivation(for: keyEvent("1", flags: [.option]), context: .init()))
+      Defaults[.pasteByDefault] = true
+      Defaults[.removeFormattingByDefault] = true
+      XCTAssertEqual(copy.action, .copy)
+      XCTAssertFalse(copy.pastes)
+      XCTAssertFalse(copy.removesFormatting)
+      XCTAssertEqual(paste.action, .paste)
+      XCTAssertTrue(paste.pastes)
+      XCTAssertFalse(paste.removesFormatting)
+    }
+  }
+
+  func testNonDigitsAndUnsupportedModifiersNeverBecomePlainNumberCopy() async throws {
+    try await withHistory { history in
+      XCTAssertNil(history.shortcutActivation(for: nil, context: .init()))
+      XCTAssertNil(history.shortcutActivation(for: keyEvent("1", type: .keyUp), context: .init()))
+      XCTAssertNil(history.shortcutActivation(for: keyEvent("!", keyCode: 18), context: .init()))
+      XCTAssertNil(history.shortcutActivation(for: keyEvent("1", flags: [.shift]), context: .init()))
+      XCTAssertNil(history.shortcutActivation(for: keyEvent("1", flags: [.control]), context: .init()))
+      XCTAssertNil(history.shortcutActivation(for: keyEvent("1", flags: [.command, .option]), context: .init()))
+    }
+  }
+
+  private func withHistory(_ verify: (History) throws -> Void) async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let savedContainer = Storage.shared.container
+    let savedSize = Defaults[.size]
+    let savedSortBy = Defaults[.sortBy]
+    let savedPinTo = Defaults[.pinTo]
+    let savedPinOrder = Defaults[.pinOrder]
+    let savedPaste = Defaults[.pasteByDefault]
+    let savedFormatting = Defaults[.removeFormattingByDefault]
+    let savedNeedsResize = AppState.shared.popup.needsResize
+    defer {
+      Storage.shared.container = savedContainer
+      Defaults[.size] = savedSize
+      Defaults[.sortBy] = savedSortBy
+      Defaults[.pinTo] = savedPinTo
+      Defaults[.pinOrder] = savedPinOrder
+      Defaults[.pasteByDefault] = savedPaste
+      Defaults[.removeFormattingByDefault] = savedFormatting
+      AppState.shared.popup.needsResize = savedNeedsResize
+    }
+    Storage.shared.container = container
+    Defaults[.size] = 20
+    Defaults[.sortBy] = .lastCopiedAt
+    Defaults[.pinTo] = .top
+    Defaults[.pinOrder] = PinOrder(pins: ["b"])
+    Defaults[.pasteByDefault] = false
+    Defaults[.removeFormattingByDefault] = false
+    for index in 0...10 {
+      let item = HistoryItem(contents: [
+        HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data("Row \(index)".utf8)),
+        HistoryItemContent(type: NSPasteboard.PasteboardType.html.rawValue, value: Data("<b>Row \(index)</b>".utf8))
+      ])
+      container.mainContext.insert(item)
+      item.title = "Row \(index)"
+      item.lastCopiedAt = Date(timeIntervalSince1970: Double(100 - index))
+      if index == 10 { item.pin = "b" }
+    }
+    try container.mainContext.save()
+    let history = History()
+    try await history.load()
+    await Task.yield()
+    try verify(history)
+  }
+
+  private func keyEvent(
+    _ character: String,
+    flags: NSEvent.ModifierFlags = [],
+    keyCode: UInt16? = nil,
+    type: NSEvent.EventType = .keyDown
+  ) -> NSEvent {
+    let key = Key(character: character, virtualKeyCode: nil)
+    return NSEvent.keyEvent(
+      with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+      characters: character, charactersIgnoringModifiers: character, isARepeat: false,
+      keyCode: keyCode ?? UInt16(key.map { Sauce.shared.keyCode(for: $0) } ?? 18)
+    )!
   }
 }

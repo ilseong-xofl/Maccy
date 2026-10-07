@@ -206,11 +206,9 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     panel.contentView = hostingView
     window = panel
     eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      guard let self, isVisible, owns(event.window), !AppState.shared.isEditingItem,
-            window?.attachedSheet == nil, NSApp.modalWindow == nil else { return event }
-      if let inputClient = event.window?.firstResponder as? NSTextInputClient, inputClient.hasMarkedText() {
-        return event
-      }
+      guard let self, isVisible, owns(event.window) else { return event }
+      let context = History.ShortcutInputContext.current(in: event.window)
+      guard context.acceptsRowShortcuts else { return event }
       switch KeyChord(event) {
       case .focusSearch:
         listWindow?.makeKeyAndOrderFront(nil)
@@ -245,13 +243,23 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
         }
         return nil
       case .selectCurrentItem:
-        AppState.shared.select(flags: .currentModifierFlags)
+        AppState.shared.select(flags: KeyShortcut.normalizedModifiers(event.modifierFlags))
         return nil
       case .openPreferences:
         AppState.shared.openPreferences()
         return nil
       default:
-        return event
+        // Keep modified keys (including native text-selection copy) in the preview responder.
+        guard KeyShortcut.normalizedModifiers(event.modifierFlags).isEmpty,
+              let shortcut = AppState.shared.history.shortcutActivation(for: event, context: context) else {
+          return event
+        }
+        AppState.shared.navigator.select(item: shortcut.item)
+        Task { @MainActor in
+          try? await Task.sleep(for: .milliseconds(50))
+          AppState.shared.history.activateShortcut(shortcut)
+        }
+        return nil
       }
     }
   }

@@ -12,23 +12,20 @@ struct KeyHandlingView<Content: View>: View {
   var body: some View {
     content()
       .onKeyPress { _ in
-        guard !appState.isEditingItem else { return .ignored }
+        let event = NSApp.currentEvent
+        let inputContext = History.ShortcutInputContext.current(
+          in: event?.window, searchFocused: keyboardFocus == .search || appState.isSearchFocused)
+        guard !inputContext.isEditingItem, !inputContext.hasMarkedText, !inputContext.hasModal else {
+          return .ignored
+        }
+        let chord = KeyChord(event)
 
         // Unfortunately, key presses don't allow access to
         // key code and don't properly work with multiple inputs,
         // so pressing ⌘, on non-English layout doesn't open
         // preferences. Stick to NSEvent to fix this behavior.
 
-        if keyboardFocus == .search {
-          // Ignore input when candidate window is open
-          // https://stackoverflow.com/questions/73677444/how-to-detect-the-candidate-window-when-using-japanese-keyboard
-          if let inputClient = NSApp.keyWindow?.firstResponder as? NSTextInputClient,
-             inputClient.hasMarkedText() {
-            return .ignored
-          }
-        }
-
-        switch KeyChord(NSApp.currentEvent) {
+        switch chord {
         case .clearHistory:
           if let item = appState.footer.items.first(where: { $0.title == "clear" }),
              item.confirmation != nil,
@@ -146,7 +143,7 @@ struct KeyHandlingView<Content: View>: View {
           appState.togglePin()
           return .handled
         case .selectCurrentItem:
-          appState.select(flags: .currentModifierFlags)
+          appState.select(flags: KeyShortcut.normalizedModifiers(event?.modifierFlags ?? []))
           return .handled
         case .close:
           if appState.preview.isVisible {
@@ -162,7 +159,7 @@ struct KeyHandlingView<Content: View>: View {
           return .handled
         case .previousPreviewImage, .nextPreviewImage:
           guard keyboardFocus != .search else { return .ignored }
-          let offset = KeyChord(NSApp.currentEvent) == .nextPreviewImage ? 1 : -1
+          let offset = chord == .nextPreviewImage ? 1 : -1
           return appState.preview.navigateImages(by: offset) ? .handled : .ignored
         case .spacePreview:
           guard keyboardFocus != .search else { return .ignored }
@@ -175,18 +172,18 @@ struct KeyHandlingView<Content: View>: View {
           ()
         }
 
-        if let item = appState.history.pressedShortcutItem {
-          appState.navigator.select(item: item)
+        if let shortcut = appState.history.shortcutActivation(for: event, context: inputContext) {
+          appState.navigator.select(item: shortcut.item)
           Task {
             try? await Task.sleep(for: .milliseconds(50))
-            appState.history.select(item, flags: .currentModifierFlags)
+            appState.history.activateShortcut(shortcut)
           }
           return .handled
         }
 
         // Plain typing belongs only to explicitly focused search. The list never
         // redirects characters (including Backspace) into the search field.
-        if keyboardFocus != .search, case .unknown = KeyChord(NSApp.currentEvent) { return .handled }
+        if keyboardFocus != .search, case .unknown = chord { return .handled }
         return .ignored
       }
   }

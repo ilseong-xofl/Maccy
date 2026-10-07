@@ -125,7 +125,23 @@ class Popup {
   }
 
   private func handleEvent(_ event: NSEvent) -> NSEvent? {
-    guard !AppState.shared.isEditingItem, !AppState.shared.isConfirmingQuit else { return event }
+    let appState = AppState.shared
+    guard !isClosed(), let eventWindow = event.window ?? NSApp.keyWindow,
+          eventWindow === appState.appDelegate?.panel || appState.preview.owns(eventWindow) else { return event }
+    // The preview keeps native modified text shortcuts; only its actual popup hotkey
+    // participates in the legacy cycle state machine.
+    if appState.preview.owns(eventWindow), event.type == .keyDown,
+       !KeyShortcut.normalizedModifiers(event.modifierFlags).isEmpty,
+       !(isHotKeyCode(Int(event.keyCode)) && isHotKeyModifiers(event.modifierFlags)) { return event }
+    let inputContext = History.ShortcutInputContext.current(
+      in: eventWindow, searchFocused: eventWindow === appState.appDelegate?.panel && appState.isSearchFocused)
+    if event.type == .keyDown, isHotKeyCode(Int(event.keyCode)),
+       let shortcut = appState.history.shortcutActivation(for: event, context: inputContext) {
+      appState.navigator.select(item: shortcut.item)
+      Task { @MainActor in appState.history.activateShortcut(shortcut) }
+      return nil
+    }
+    guard inputContext.acceptsRowShortcuts else { return event }
 
     switch event.type {
     case .keyDown:
@@ -139,14 +155,9 @@ class Popup {
 
   private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
     if isHotKeyCode(Int(event.keyCode)) {
-      if let item = History.shared.pressedShortcutItem {
-        AppState.shared.navigator.select(item: item)
-        let modifierFlags = NSEvent.ModifierFlags.currentModifierFlags
-        Task { @MainActor in
-          AppState.shared.history.select(item, flags: modifierFlags)
-        }
-        return nil
-      }
+      // A plain digit with no matching row must not enter the popup hotkey's cycle mode.
+      if KeyShortcut.normalizedModifiers(event.modifierFlags).isEmpty,
+         let character = event.characters, KeyShortcut.isCopyDigit(character) { return event }
 
       if state == .opening {
         state = .cycle
@@ -170,7 +181,7 @@ class Popup {
   private func handleFlagsChanged(_ event: NSEvent) -> NSEvent? {
     // If we are in cycle mode, releasing modifiers triggers a selection
     if state == .cycle && allModifiersReleased(event) {
-      let modifierFlags = NSEvent.ModifierFlags.currentModifierFlags
+      let modifierFlags = KeyShortcut.normalizedModifiers(event.modifierFlags)
       DispatchQueue.main.async {
         AppState.shared.select(flags: modifierFlags)
       }

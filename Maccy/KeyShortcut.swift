@@ -9,11 +9,23 @@ struct KeyShortcut: Identifiable {
     if character.lowercased() == "f" {
       return [KeyShortcut(key: key, modifierFlags: [.option])]
     }
-    return [
+    let modified = [
       KeyShortcut(key: key),
       KeyShortcut(key: key, modifierFlags: [.option]),
       KeyShortcut(key: key, modifierFlags: [Defaults[.pasteByDefault] ? .command : .option, .shift])
     ]
+    if isCopyDigit(character) {
+      return [KeyShortcut(key: key, modifierFlags: [])] + modified
+    }
+    return modified
+  }
+
+  static func isCopyDigit(_ character: String) -> Bool {
+    character.count == 1 && "123456789".contains(character)
+  }
+
+  static func normalizedModifiers(_ flags: NSEvent.ModifierFlags) -> NSEvent.ModifierFlags {
+    flags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
   }
 
   let id = UUID()
@@ -33,19 +45,11 @@ struct KeyShortcut: Identifiable {
   }
 
   func isVisible(_ all: [KeyShortcut], _ pressedModifierFlags: NSEvent.ModifierFlags) -> Bool {
-    if all.count == 1 {
-      return true
-    }
-
-    if modifierFlags == [.command], pressedModifierFlags.isEmpty {
-      return true
-    }
-
-    if modifierFlags == [.command], !pressedModifierFlags.isEmpty,
-       !all.contains(where: { $0.id != id && $0.modifierFlags == pressedModifierFlags }) {
-      return true
-    }
-
-    return modifierFlags == pressedModifierFlags
+    let flags = Self.normalizedModifiers(pressedModifierFlags)
+    let visible = all.first { $0.modifierFlags == flags }
+      ?? all.first { $0.modifierFlags.isEmpty }
+      ?? all.first { $0.modifierFlags == [.command] }
+      ?? all.first
+    return visible?.id == id
   }
 }
