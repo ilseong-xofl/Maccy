@@ -16,7 +16,7 @@ struct PreviewItemView: View {
       VStack(spacing: Self.contentSpacing) {
         previewContent
           .frame(maxWidth: .infinity)
-          .frame(height: contentHeight(width: geometry.size.width, maximum: availableHeight), alignment: .top)
+          .frame(height: availableHeight)
           .clipped()
 
         ScrollView {
@@ -34,14 +34,6 @@ struct PreviewItemView: View {
     }
   }
 
-  private func contentHeight(width: CGFloat, maximum: CGFloat) -> CGFloat {
-    guard item.hasImage, let size = item.imagePixelSize,
-          size.width > 0, size.height > 0 else { return maximum }
-    // Reserve only the height the image actually occupies. Information follows
-    // the image instead of sitting below an empty, vertically centered canvas.
-    return min(maximum, max(0, width) * size.height / size.width)
-  }
-
   @ViewBuilder
   private var previewContent: some View {
     if item.hasImage {
@@ -52,7 +44,7 @@ struct PreviewItemView: View {
           Image(nsImage: image)
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .clipShape(.rect(cornerRadius: 4))
         } else {
           imagePlaceholder {
