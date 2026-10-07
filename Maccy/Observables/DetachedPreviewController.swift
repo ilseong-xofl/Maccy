@@ -88,7 +88,8 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     guard isVisible, !AppState.shared.isEditingItem,
           let item = AppState.shared.navigator.leadHistoryItem, item.previewImageCount > 1 else { return false }
     if previewedItemID != item.id { resetImageSelection() }
-    let nextIndex = min(max(selectedImageIndex + offset, 0), item.previewImageCount - 1)
+    let count = item.previewImageCount
+    let nextIndex = (selectedImageIndex + offset % count + count) % count
     if nextIndex != selectedImageIndex {
       contentMetrics = nil
       selectedImageIndex = nextIndex

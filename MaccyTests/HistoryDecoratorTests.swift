@@ -1261,7 +1261,7 @@ class DetachedPreviewAutomaticSizingTests: XCTestCase {
 
 @MainActor
 class DetachedPreviewSessionSizingTests: XCTestCase {
-  func testCarouselNavigatesInOrderAndStopsAtBothEndsWithoutChangingClipboardSelection() throws {
+  func testCarouselWrapsInBothDirectionsWithoutChangingClipboardSelection() throws {
     let item = galleryDecorator(pageCount: 4)
     try withPreviewSession(initialItem: item) { controller, _ in
       XCTAssertFalse(controller.navigateImages(by: 1))
@@ -1269,15 +1269,25 @@ class DetachedPreviewSessionSizingTests: XCTestCase {
 
       XCTAssertEqual(controller.selectedImageIndex, 0)
       XCTAssertTrue(controller.navigateImages(by: -1))
+      XCTAssertEqual(controller.selectedImageIndex, 3)
+      XCTAssertTrue(controller.navigateImages(by: 1))
       XCTAssertEqual(controller.selectedImageIndex, 0)
-      for index in 1...3 {
+
+      for index in [1, 2, 3, 0, 1, 2, 3, 0] {
         XCTAssertTrue(controller.navigateImages(by: 1))
         XCTAssertEqual(controller.selectedImageIndex, index)
+        XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, item.id)
       }
-      XCTAssertTrue(controller.navigateImages(by: 1))
+      for index in [3, 2, 1, 0, 3, 2, 1, 0] {
+        XCTAssertTrue(controller.navigateImages(by: -1))
+        XCTAssertEqual(controller.selectedImageIndex, index)
+        XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, item.id)
+      }
+
+      XCTAssertTrue(controller.navigateImages(by: 9))
+      XCTAssertEqual(controller.selectedImageIndex, 1)
+      XCTAssertTrue(controller.navigateImages(by: -10))
       XCTAssertEqual(controller.selectedImageIndex, 3)
-      XCTAssertTrue(controller.navigateImages(by: -1))
-      XCTAssertEqual(controller.selectedImageIndex, 2)
       XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, item.id)
     }
   }

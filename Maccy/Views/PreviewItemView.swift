@@ -123,10 +123,10 @@ struct PreviewItemView: View {
     ZStack(alignment: .bottom) {
       HStack {
         carouselButton("Previous image", symbol: "chevron.left", offset: -1,
-                       disabled: imageIndex == 0, identifier: "previewPreviousImage")
+                       identifier: "previewPreviousImage")
         Spacer()
         carouselButton("Next image", symbol: "chevron.right", offset: 1,
-                       disabled: imageIndex >= item.previewImageCount - 1, identifier: "previewNextImage")
+                       identifier: "previewNextImage")
       }
       .padding(.horizontal, 8)
       .frame(maxHeight: .infinity)
@@ -145,7 +145,7 @@ struct PreviewItemView: View {
   }
 
   private func carouselButton(_ label: String, symbol: String, offset: Int,
-                              disabled: Bool, identifier: String) -> some View {
+                              identifier: String) -> some View {
     Button {
       onNavigate(offset)
     } label: {
@@ -158,8 +158,6 @@ struct PreviewItemView: View {
     }
     .buttonStyle(.plain)
     .focusable(false)
-    .disabled(disabled)
-    .opacity(disabled ? 0.35 : 1)
     .help(label)
     .accessibilityLabel(label)
     .accessibilityIdentifier(identifier)
