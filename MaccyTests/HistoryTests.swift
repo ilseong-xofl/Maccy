@@ -1,6 +1,7 @@
 import XCTest
 import Defaults
 import SwiftData
+import SwiftUI
 import Sauce
 @testable import Maccy
 
@@ -1193,6 +1194,105 @@ final class FavoriteHistoryTests: XCTestCase {
       XCTAssertFalse(history.items.contains(protected))
       XCTAssertEqual(try Storage.shared.context.fetchCount(FetchDescriptor<HistoryItem>()), 1)
     }
+  }
+
+  func testFreshPopupReopenResetsFavoritesFilterAndShortcutsWithoutRemovingFavorite() async throws {
+    try await withHistory { history in
+      try withTestPanel { panel in
+        let allItems = history.items.toArray()
+        let favorite = allItems[1]
+        history.toggleFavorite(favorite)
+        panel.open(height: 400, at: .center)
+        history.filter = .favorites
+        XCTAssertEqual(history.items.map(\.id), [favorite.id])
+        XCTAssertEqual(favorite.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
+
+        panel.close()
+        XCTAssertFalse(panel.isPresented)
+        XCTAssertEqual(history.filter, .favorites)
+        panel.open(height: 400, at: .center)
+
+        XCTAssertTrue(panel.isPresented)
+        XCTAssertEqual(history.filter, .history)
+        XCTAssertEqual(history.items.map(\.id), allItems.map(\.id))
+        for (index, item) in history.unpinnedItems.enumerated() {
+          XCTAssertEqual(item.shortcuts.map(\.key), KeyShortcut.create(character: String(index + 1)).map(\.key))
+        }
+        let freshContext = ModelContext(Storage.shared.container)
+        let saved = try XCTUnwrap(freshContext.fetch(FetchDescriptor<HistoryItem>())
+          .first { $0.id == favorite.item.id })
+        XCTAssertTrue(saved.isFavorite)
+        XCTAssertTrue(favorite.isFavorite)
+      }
+    }
+  }
+
+  func testOpeningAlreadyPresentedPopupPreservesFavoritesFilter() async throws {
+    try await withHistory { history in
+      withTestPanel { panel in
+        let favorite = history.unpinnedItems[1]
+        history.toggleFavorite(favorite)
+        panel.open(height: 400, at: .center)
+        history.filter = .favorites
+        AppState.shared.navigator.select(item: favorite)
+
+        panel.open(height: 400, at: .center)
+
+        XCTAssertTrue(panel.isPresented)
+        XCTAssertEqual(history.filter, .favorites)
+        XCTAssertEqual(history.items.map(\.id), [favorite.id])
+        XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, favorite.id)
+        XCTAssertEqual(favorite.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
+      }
+    }
+  }
+
+  func testReopeningEmptyFavoritesRestoresHistoryAndFirstSelection() async throws {
+    try await withHistory { history in
+      try withTestPanel { panel in
+        let first = try XCTUnwrap(history.firstVisibleItem)
+        panel.open(height: 400, at: .center)
+        history.filter = .favorites
+        XCTAssertTrue(history.items.isEmpty)
+        XCTAssertTrue(AppState.shared.navigator.selection.isEmpty)
+        XCTAssertNil(AppState.shared.navigator.leadHistoryItem)
+        panel.close()
+
+        panel.open(height: 400, at: .center)
+
+        XCTAssertEqual(history.filter, .history)
+        XCTAssertEqual(history.items.count, 4)
+        XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, first.id)
+        XCTAssertEqual(AppState.shared.navigator.selection.items.map(\.id), [first.id])
+        XCTAssertEqual(first.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
+        XCTAssertFalse(AppState.shared.preview.isVisible)
+      }
+    }
+  }
+
+  private final class NonPresentingTestPanel: FloatingPanel<EmptyView> {
+    // Exercise open/close state transitions without ordering a test window on screen.
+    override func orderFrontRegardless() {}
+    override func makeKey() {}
+  }
+
+  private func withTestPanel(_ verify: (FloatingPanel<EmptyView>) throws -> Void) rethrows {
+    let appState = AppState.shared
+    let savedWindowSize = Defaults[.windowSize]
+    let savedWindowPosition = Defaults[.windowPosition]
+    let savedSearchFocused = appState.isSearchFocused
+    let savedEditingItem = appState.isEditingItem
+    let panel = NonPresentingTestPanel(
+      contentRect: NSRect(x: 0, y: 0, width: 320, height: 400), onClose: {}) { EmptyView() }
+    panel.isReleasedWhenClosed = false
+    defer {
+      panel.close()
+      Defaults[.windowSize] = savedWindowSize
+      Defaults[.windowPosition] = savedWindowPosition
+      appState.isSearchFocused = savedSearchFocused
+      appState.isEditingItem = savedEditingItem
+    }
+    try verify(panel)
   }
 
   private func withHistory(_ verify: (History) async throws -> Void) async throws {

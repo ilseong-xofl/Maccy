@@ -88,6 +88,9 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
 
   func open(height _: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
     let appState = AppState.shared
+    if !isPresented {
+      appState.history.filter = .history
+    }
     let requestedSize = Defaults[.windowSize]
     let visibleFrame = targetScreen(at: popupPosition)?.visibleFrame
     let finalSize = NSSize(

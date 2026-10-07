@@ -22,7 +22,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   var pasteStack: PasteStack?
 
-  // A view choice for this session; neither stored items nor pin order change with it.
+  // A temporary view choice, reset to history when the popup opens again.
   var filter: HistoryFilter = .history {
     didSet {
       guard filter != oldValue else { return }
