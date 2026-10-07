@@ -6,12 +6,17 @@ struct PreviewItemView: View {
   private static let contentSpacing: CGFloat = 10
 
   var item: HistoryItemDecorator
+  var surroundingHeight: CGFloat = 0
+  var onLayout: (DetachedPreviewController.ContentMetrics) -> Void = { _ in }
   @State private var metadataHeight: CGFloat = 114
 
   var body: some View {
     GeometryReader { geometry in
-      let informationHeight = min(metadataHeight, max(0, geometry.size.height) * 0.5)
+      let informationHeight = min(metadataHeight, max(0, geometry.size.height - Self.contentSpacing - 24))
       let availableHeight = max(0, geometry.size.height - informationHeight - Self.contentSpacing)
+      let metrics = DetachedPreviewController.ContentMetrics(
+        itemID: item.id, imageSize: item.imagePixelSize, imageWidth: geometry.size.width,
+        nonImageHeight: metadataHeight + Self.contentSpacing + surroundingHeight)
 
       VStack(spacing: Self.contentSpacing) {
         previewContent
@@ -31,6 +36,10 @@ struct PreviewItemView: View {
         .id("metadata-\(item.id)")
       }
       .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+      .onChange(of: metrics, initial: true) { _, value in
+        // AppKit resizing happens after this SwiftUI layout pass has finished.
+        DispatchQueue.main.async { onLayout(value) }
+      }
     }
   }
 

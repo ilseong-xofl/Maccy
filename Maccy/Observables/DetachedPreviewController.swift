@@ -5,11 +5,21 @@ import SwiftUI
 
 @Observable
 final class DetachedPreviewController: NSObject, NSWindowDelegate {
+  nonisolated static let defaultSize = NSSize(width: 520, height: 600)
   nonisolated static let minimumSize = NSSize(width: 280, height: 240)
   nonisolated static let windowGap: CGFloat = 8
 
+  struct ContentMetrics: Equatable {
+    let itemID: UUID
+    let imageSize: NSSize?
+    let imageWidth: CGFloat
+    let nonImageHeight: CGFloat
+  }
+
   private(set) var isVisible = false
   @ObservationIgnored private(set) var window: NSPanel?
+  @ObservationIgnored private var automaticallyFitsImage = true
+  @ObservationIgnored private var contentMetrics: ContentMetrics?
   @ObservationIgnored private var directionObservation: Task<Void, Never>?
   @ObservationIgnored private var eventMonitor: Any?
 
@@ -38,6 +48,7 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     }
     guard canPreviewSelection, let anchor = listWindow, anchor.isVisible else { return }
     if window == nil { makeWindow() }
+    automaticallyFitsImage = true
     isVisible = true
     reposition()
     window?.makeKeyAndOrderFront(nil)
@@ -57,8 +68,15 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     guard isVisible else { return }
     if !canPreviewSelection {
       close(restoreListFocus: window?.isKeyWindow == true)
+      return
     }
-    // SlideoutContentView observes the selected item directly.
+    reposition()
+  }
+
+  func contentLayoutDidChange(_ metrics: ContentMetrics) {
+    guard metrics.itemID == AppState.shared.navigator.leadHistoryItem?.id else { return }
+    contentMetrics = metrics
+    reposition()
   }
 
   func reposition() {
@@ -68,10 +86,21 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     window.minSize = NSSize(width: min(Self.minimumSize.width, visibleFrame.width),
                             height: min(Self.minimumSize.height, visibleFrame.height))
     window.maxSize = visibleFrame.size
+    let maximumFrame = Self.placement(anchorFrame: anchor.frame, visibleFrame: visibleFrame,
+                                     requestedSize: Defaults[.previewWindowSize], direction: Defaults[.previewDirection])
+    var requestedSize = maximumFrame.size
+    let nativeChromeHeight = maximumFrame.height - window.contentRect(forFrameRect: maximumFrame).height
+    if automaticallyFitsImage, let metrics = contentMetrics,
+       metrics.itemID == AppState.shared.navigator.leadHistoryItem?.id,
+       abs(metrics.imageWidth - (maximumFrame.width - SlideoutContentView.horizontalPadding * 2)) < 1 {
+      requestedSize = Self.automaticSize(imageSize: metrics.imageSize, maximumSize: maximumFrame.size,
+                                         imageWidth: metrics.imageWidth,
+                                         nonImageHeight: metrics.nonImageHeight + nativeChromeHeight)
+    }
     let frame = Self.placement(anchorFrame: anchor.frame, visibleFrame: visibleFrame,
-                               requestedSize: Defaults[.previewWindowSize], direction: Defaults[.previewDirection])
-    // Screen constraints are temporary; only a completed user resize saves a new size.
-    window.setFrame(frame, display: true)
+                               requestedSize: requestedSize, direction: Defaults[.previewDirection])
+    // Auto-fit and screen constraints never become the next opening's baseline size.
+    if window.frame != frame { window.setFrame(frame, display: true) }
   }
 
   func owns(_ candidate: NSWindow?) -> Bool {
@@ -89,6 +118,11 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     guard !AppState.shared.isEditingItem, sender.attachedSheet == nil else { return false }
     close(restoreListFocus: true)
     return false
+  }
+
+  func windowWillStartLiveResize(_ notification: Notification) {
+    guard let resizedWindow = notification.object as? NSWindow, resizedWindow === window else { return }
+    automaticallyFitsImage = false
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
@@ -186,6 +220,18 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     }
   }
 
+  /// Width is the baseline width, including when a small image must be enlarged.
+  nonisolated static func automaticSize(imageSize: NSSize?, maximumSize: NSSize,
+                                        imageWidth: CGFloat, nonImageHeight: CGFloat) -> NSSize {
+    guard let imageSize, imageSize.width.isFinite, imageSize.height.isFinite,
+          imageSize.width > 0, imageSize.height > 0,
+          imageWidth.isFinite, imageWidth > 0,
+          nonImageHeight.isFinite, nonImageHeight >= 0 else { return maximumSize }
+    let fittedHeight = ceil(imageWidth * (imageSize.height / imageSize.width) + nonImageHeight)
+    return NSSize(width: maximumSize.width,
+                  height: min(maximumSize.height, max(minimumSize.height, fittedHeight)))
+  }
+
   /// Computes an on-screen frame without changing the requested size or the list window.
   nonisolated static func placement(anchorFrame: NSRect, visibleFrame: NSRect,
                                      requestedSize: NSSize, direction: PreviewDirection) -> NSRect {
@@ -209,9 +255,8 @@ final class DetachedPreviewController: NSObject, NSWindowDelegate {
     } else {
       useRight = rightSpace > leftSpace
     }
-    let availableWidth = useRight ? rightSpace : leftSpace
-    // If neither side can hold even the minimum, overlap the list rather than leave the screen.
-    let finalWidth = min(width, max(minimumSize.width, availableWidth))
+    // Keep the preview width stable. If neither side fits, overlap the list within the screen.
+    let finalWidth = width
     let proposedX = useRight ? anchorFrame.maxX + windowGap : anchorFrame.minX - windowGap - finalWidth
     let x = min(max(proposedX, screen.minX), screen.maxX - finalWidth)
     let y = min(max(anchorFrame.maxY - height, screen.minY), screen.maxY - height)

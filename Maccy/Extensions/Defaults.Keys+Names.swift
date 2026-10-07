@@ -68,7 +68,7 @@ nonisolated extension Defaults.Keys {
   static let previewDelay = Key<Int>("previewDelay", default: 1500, suite: preferencesSuite)
   static let previewDirection = Key<PreviewDirection>("previewDirection", default: .right, suite: preferencesSuite)
   static let previewWindowSize = Key<NSSize>(
-    "previewWindowSize", default: NSSize(width: 520, height: 600), suite: preferencesSuite
+    "previewWindowSize", default: DetachedPreviewController.defaultSize, suite: preferencesSuite
   )
   static let removeFormattingByDefault = Key<Bool>("removeFormattingByDefault", default: false, suite: preferencesSuite)
   static let searchMode = Key<Search.Mode>("searchMode", default: .exact, suite: preferencesSuite)

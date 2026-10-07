@@ -789,13 +789,14 @@ class DetachedPreviewPlacementTests: XCTestCase {
     XCTAssertEqual(frame.size, requestedSize)
   }
 
-  func testNeitherSideFitsChoosesMoreRoomAndReducesWidth() {
+  func testNeitherSideFitsKeepsWidthAndOverlapsListOnRoomierSide() {
     let screen = NSRect(x: 0, y: 0, width: 1_400, height: 900)
     let anchor = NSRect(x: 350, y: 100, width: 400, height: 700)
     let frame = DetachedPreviewController.placement(anchorFrame: anchor, visibleFrame: screen,
                                                     requestedSize: NSSize(width: 800, height: 600), direction: .left)
-    XCTAssertEqual(frame.minX, 758)
-    XCTAssertEqual(frame.width, 642)
+    XCTAssertEqual(frame.minX, 600)
+    XCTAssertEqual(frame.width, 800)
+    XCTAssertLessThan(frame.minX, anchor.maxX)
     XCTAssertEqual(frame.height, 600)
     XCTAssertTrue(screen.contains(frame))
   }
@@ -832,7 +833,7 @@ class DetachedPreviewPlacementTests: XCTestCase {
     XCTAssertTrue(screen.contains(above))
   }
 
-  func testTemporaryConstraintPreservesRequestedSizeForLargerScreen() {
+  func testAdjacentSpaceDoesNotChangeRequestedSizeOrPersistNewSize() {
     let savedSize = Defaults[.previewWindowSize]
     defer { Defaults[.previewWindowSize] = savedSize }
     let requested = NSSize(width: 800, height: 700)
@@ -844,9 +845,130 @@ class DetachedPreviewPlacementTests: XCTestCase {
     let unconstrained = DetachedPreviewController.placement(
       anchorFrame: anchor, visibleFrame: NSRect(x: 0, y: 0, width: 2_400, height: 1_200),
       requestedSize: Defaults[.previewWindowSize], direction: .right)
-    XCTAssertLessThan(constrained.width, requested.width)
+    XCTAssertEqual(constrained.size, requested)
     XCTAssertEqual(Defaults[.previewWindowSize], requested)
     XCTAssertEqual(unconstrained.size, requested)
+  }
+}
+
+@MainActor
+class DetachedPreviewAutomaticSizingTests: XCTestCase {
+  private let maximumSize = NSSize(width: 520, height: 600)
+  private let imageWidth: CGFloat = 508
+  private let nonImageHeight: CGFloat = 180
+
+  func testFactoryDefaultSizeProvidesAnAutomaticHeightCeiling() {
+    XCTAssertEqual(DetachedPreviewController.defaultSize, maximumSize)
+    let size = automaticSize(for: NSSize(width: 2_000, height: 2_000))
+    XCTAssertEqual(size, maximumSize)
+  }
+
+  func testWideImageShrinksOnlyHeightToItsDisplayedAspectRatio() {
+    let size = automaticSize(for: NSSize(width: 2_000, height: 1_000))
+    XCTAssertEqual(size, NSSize(width: 520, height: 434))
+  }
+
+  func testSmallImageUpscalesToTheSameWidthAsLargerImageWithSameAspectRatio() {
+    let small = automaticSize(for: NSSize(width: 32, height: 18))
+    let large = automaticSize(for: NSSize(width: 3_200, height: 1_800))
+    XCTAssertEqual(small, NSSize(width: 520, height: 466))
+    XCTAssertEqual(small, large)
+    XCTAssertGreaterThan(small.height - nonImageHeight, 18)
+  }
+
+  func testPortraitImageStaysWithinDefaultSize() {
+    let size = automaticSize(for: NSSize(width: 1_000, height: 3_000))
+    XCTAssertEqual(size, maximumSize)
+  }
+
+  func testExtremePanoramaHonorsMinimumWindowHeight() {
+    let size = automaticSize(for: NSSize(width: 10_000, height: 10))
+    XCTAssertEqual(size.width, maximumSize.width)
+    XCTAssertEqual(size.height, DetachedPreviewController.minimumSize.height)
+  }
+
+  func testMissingOrInvalidImageDimensionsKeepDefaultSize() {
+    let invalidSizes: [NSSize?] = [
+      nil,
+      NSSize(width: 0, height: 100),
+      NSSize(width: 100, height: 0),
+      NSSize(width: -1, height: 100),
+      NSSize(width: 100, height: -1),
+      NSSize(width: CGFloat.nan, height: 100),
+      NSSize(width: 100, height: CGFloat.infinity)
+    ]
+    for imageSize in invalidSizes {
+      XCTAssertEqual(automaticSize(for: imageSize), maximumSize)
+    }
+  }
+
+  func testMissingOrInvalidMeasuredImageWidthKeepsDefaultSize() {
+    for width: CGFloat in [0, -1, CGFloat.nan, CGFloat.infinity] {
+      let size = DetachedPreviewController.automaticSize(
+        imageSize: NSSize(width: 2_000, height: 1_000), maximumSize: maximumSize,
+        imageWidth: width, nonImageHeight: nonImageHeight)
+      XCTAssertEqual(size, maximumSize)
+    }
+  }
+
+  func testInvalidMeasuredChromeHeightKeepsDefaultSize() {
+    for height: CGFloat in [-1, CGFloat.nan, CGFloat.infinity] {
+      let size = DetachedPreviewController.automaticSize(
+        imageSize: NSSize(width: 2_000, height: 1_000), maximumSize: maximumSize,
+        imageWidth: imageWidth, nonImageHeight: height)
+      XCTAssertEqual(size, maximumSize)
+    }
+  }
+
+  func testWrappingMetadataAddsItsMeasuredHeightWithoutChangingWidth() {
+    let imageSize = NSSize(width: 2_000, height: 1_000)
+    let singleLine = automaticSize(for: imageSize)
+    let wrapped = DetachedPreviewController.automaticSize(
+      imageSize: imageSize, maximumSize: maximumSize,
+      imageWidth: imageWidth, nonImageHeight: nonImageHeight + 20)
+    XCTAssertEqual(wrapped.width, singleLine.width)
+    XCTAssertEqual(wrapped.height, singleLine.height + 20)
+  }
+
+  func testSavedManualBaselineRetainsItsWidthWhileShortImagesFitHeight() {
+    let savedBaseline = NSSize(width: 900, height: 800)
+    let size = DetachedPreviewController.automaticSize(
+      imageSize: NSSize(width: 200, height: 100), maximumSize: savedBaseline,
+      imageWidth: 888, nonImageHeight: nonImageHeight)
+    XCTAssertEqual(size, NSSize(width: 900, height: 624))
+  }
+
+  func testScreenConstrainedMaximumStillCapsHeightAndPreservesItsWidth() {
+    let constrainedMaximum = NSSize(width: 480, height: 500)
+    let wide = DetachedPreviewController.automaticSize(
+      imageSize: NSSize(width: 2_000, height: 1_000), maximumSize: constrainedMaximum,
+      imageWidth: 468, nonImageHeight: nonImageHeight)
+    let tall = DetachedPreviewController.automaticSize(
+      imageSize: NSSize(width: 1_000, height: 2_000), maximumSize: constrainedMaximum,
+      imageWidth: 468, nonImageHeight: nonImageHeight)
+    XCTAssertEqual(wide, NSSize(width: 480, height: 414))
+    XCTAssertEqual(tall, constrainedMaximum)
+  }
+
+  func testPlacementOnlyShrinksWidthWhenScreenItselfIsNarrower() {
+    let anchor = NSRect(x: 300, y: 100, width: 400, height: 700)
+    let requested = NSSize(width: 800, height: 600)
+    let roomyScreen = NSRect(x: 0, y: 0, width: 1_100, height: 900)
+    let narrowScreen = NSRect(x: 0, y: 0, width: 700, height: 900)
+    let roomyFrame = DetachedPreviewController.placement(
+      anchorFrame: anchor, visibleFrame: roomyScreen, requestedSize: requested, direction: .right)
+    let narrowFrame = DetachedPreviewController.placement(
+      anchorFrame: anchor, visibleFrame: narrowScreen, requestedSize: requested, direction: .right)
+    XCTAssertEqual(roomyFrame.width, requested.width)
+    XCTAssertEqual(narrowFrame.width, narrowScreen.width)
+    XCTAssertTrue(roomyScreen.contains(roomyFrame))
+    XCTAssertTrue(narrowScreen.contains(narrowFrame))
+  }
+
+  private func automaticSize(for imageSize: NSSize?) -> NSSize {
+    DetachedPreviewController.automaticSize(
+      imageSize: imageSize, maximumSize: maximumSize,
+      imageWidth: imageWidth, nonImageHeight: nonImageHeight)
   }
 }
 
