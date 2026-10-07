@@ -33,7 +33,8 @@ struct AppearanceSettingsPane: View {
   private let imageHeightFormatter: NumberFormatter = {
     let formatter = NumberFormatter()
     formatter.minimum = 1
-    formatter.maximum = 200
+    formatter.maximum = 600
+    formatter.allowsFloats = false
     return formatter
   }()
 
@@ -140,7 +141,7 @@ struct AppearanceSettingsPane: View {
             .frame(width: 120)
             .help(Text("ImageHeightTooltip", tableName: "AppearanceSettings"))
             .accessibilityLabel(Text("ImageHeight", tableName: "AppearanceSettings"))
-          Stepper("", value: $imageHeight, in: 1...200)
+          Stepper("", value: $imageHeight, in: 1...600)
             .labelsHidden()
             .accessibilityLabel(Text("ImageHeight", tableName: "AppearanceSettings"))
         }

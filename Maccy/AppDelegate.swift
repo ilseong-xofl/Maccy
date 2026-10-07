@@ -144,6 +144,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   #if DEBUG
   private func configurePreviewDemoPreferences() {
     Defaults[.textPreviewLines] = 5
+    Defaults[.imageMaxHeight] = 300
     Defaults[.windowSize] = NSSize(width: 640, height: 700)
     Defaults[.popupPosition] = .center
     Defaults[.openPreviewAutomatically] = false
@@ -185,6 +186,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       context.insert(item)
       item.application = sample.application
       item.firstCopiedAt = timestamp.addingTimeInterval(-Double(index))
+      item.lastCopiedAt = item.firstCopiedAt
+      item.title = item.generateTitle()
+    }
+    // Optional file-URL-only fixture exercises Finder-style copies without touching the system clipboard.
+    if let argument = CommandLine.arguments.firstIndex(of: "--preview-image"),
+       CommandLine.arguments.indices.contains(argument + 1) {
+      let url = URL(fileURLWithPath: CommandLine.arguments[argument + 1])
+      let item = HistoryItem(contents: [HistoryItemContent(type: NSPasteboard.PasteboardType.fileURL.rawValue,
+                                                         value: url.dataRepresentation)])
+      context.insert(item)
+      item.application = "com.apple.finder"
+      item.firstCopiedAt = timestamp.addingTimeInterval(1)
       item.lastCopiedAt = item.firstCopiedAt
       item.title = item.generateTitle()
     }

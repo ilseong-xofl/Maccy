@@ -63,21 +63,25 @@ class HistoryItemDecoratorTests: XCTestCase {
     XCTAssertNil(itemDecorator.thumbnailImage)
   }
 
-  func testImage() {
+  func testImage() async {
     let image = NSImage(named: "StatusBarMenuImage")!
     let itemDecorator = historyItemDecorator(image)
-    itemDecorator.sizeImages()
+    await itemDecorator.sizeImages()
     XCTAssertEqual(itemDecorator.title, "")
-    XCTAssertEqual(itemDecorator.previewImage!.size, image.size)
-    XCTAssertEqual(itemDecorator.thumbnailImage!.size, image.size)
+    XCTAssertEqual(itemDecorator.previewImage!.size, itemDecorator.thumbnailImage!.size)
+    XCTAssertNotNil(itemDecorator.imagePixelSize)
   }
 
-  // We also need to add test for image with width bigger than max width.
-  func testImageWithHeightBiggerThanMaxHeight() {
+  func testImageDecodeIsIndependentOfDisplayHeight() async {
     let image = NSImage(named: "NSApplicationIcon")!
     let itemDecorator = historyItemDecorator(image)
-    itemDecorator.sizeImages()
-    XCTAssertEqual(itemDecorator.thumbnailImage!.size, NSSize(width: 40, height: 40))
+    await itemDecorator.sizeImages()
+    XCTAssertGreaterThan(itemDecorator.thumbnailImage!.size.height, 40)
+    XCTAssertLessThanOrEqual(itemDecorator.thumbnailImage!.size.height, 2048)
+    let decoded = itemDecorator.thumbnailImage
+    Defaults[.imageMaxHeight] = 300
+    await itemDecorator.sizeImages()
+    XCTAssertTrue(itemDecorator.thumbnailImage === decoded)
   }
 
   func testFile() {
@@ -390,6 +394,176 @@ class HistoryItemDecoratorTests: XCTestCase {
 }
 
 @MainActor
+class ClipboardImagePreviewTests: XCTestCase {
+  private var files: [URL] = []
+
+  override func tearDown() {
+    for file in files { try? FileManager.default.removeItem(at: file) }
+    files = []
+    super.tearDown()
+  }
+
+  private func imageData(width: Int = 800, height: Int = 400,
+                         format: NSBitmapImageRep.FileType = .png) throws -> Data {
+    let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                               isPlanar: false, colorSpaceName: .deviceRGB,
+                                               bytesPerRow: 0, bitsPerPixel: 0))
+    return try XCTUnwrap(bitmap.representation(using: format, properties: [:]))
+  }
+
+  private func imageFile(extension suffix: String = "png", data: Data? = nil) throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("미리 보기-\(UUID()).\(suffix)")
+    try (data ?? imageData()).write(to: url)
+    files.append(url)
+    return url
+  }
+
+  private func decorator(_ values: [(NSPasteboard.PasteboardType, Data?)]) -> HistoryItemDecorator {
+    let item = HistoryItem(contents: values.map { HistoryItemContent(type: $0.0.rawValue, value: $0.1) })
+    Storage.shared.context.insert(item)
+    item.title = item.generateTitle()
+    return HistoryItemDecorator(item)
+  }
+
+  func testFileURLOnlyPNGShowsImageWithoutChangingClipboardPayload() async throws {
+    let url = try imageFile()
+    let value = url.dataRepresentation
+    let item = decorator([(.fileURL, value)])
+    await item.sizeImages()
+
+    XCTAssertEqual(item.imagePixelSize, NSSize(width: 800, height: 400))
+    XCTAssertNotNil(item.thumbnailImage)
+    XCTAssertEqual(item.item.contents.count, 1)
+    XCTAssertEqual(item.item.contents.first?.type, NSPasteboard.PasteboardType.fileURL.rawValue)
+    XCTAssertEqual(item.item.contents.first?.value, value)
+    XCTAssertEqual(item.item.fileURLs, [url])
+    XCTAssertTrue(item.listText.contains(url.lastPathComponent))
+  }
+
+  func testJPEGFileWithUppercaseExtensionShowsImage() async throws {
+    let url = try imageFile(extension: "JPG", data: imageData(format: .jpeg))
+    let item = decorator([(.fileURL, url.dataRepresentation)])
+    await item.sizeImages()
+    XCTAssertNotNil(item.thumbnailImage)
+  }
+
+  func testRawImageWinsOverFileURL() async throws {
+    let url = try imageFile()
+    let item = decorator([(.fileURL, url.dataRepresentation), (.png, try imageData(width: 120, height: 80))])
+    await item.sizeImages()
+    XCTAssertEqual(item.imagePixelSize, NSSize(width: 120, height: 80))
+  }
+
+  func testInvalidFirstRepresentationDoesNotHideValidImage() async throws {
+    let item = decorator([(.png, Data("invalid".utf8)), (.tiff, try imageData(format: .tiff))])
+    await item.sizeImages()
+    XCTAssertNotNil(item.thumbnailImage)
+  }
+
+  func testNilFirstRepresentationDoesNotHideValidImage() async throws {
+    let item = decorator([(.png, nil), (.tiff, try imageData(format: .tiff))])
+    await item.sizeImages()
+    XCTAssertNotNil(item.thumbnailImage)
+  }
+
+  func testInvalidImageFallsBackToPath() async throws {
+    let url = try imageFile(data: Data("not an image".utf8))
+    let item = decorator([(.fileURL, url.dataRepresentation)])
+    await item.sizeImages()
+    XCTAssertNil(item.thumbnailImage)
+    XCTAssertTrue(item.listText.contains(url.lastPathComponent))
+  }
+
+  func testDeletedImageFallsBackToPath() async throws {
+    let url = try imageFile()
+    try FileManager.default.removeItem(at: url)
+    let item = decorator([(.fileURL, url.dataRepresentation)])
+    await item.sizeImages()
+    XCTAssertNil(item.thumbnailImage)
+    XCTAssertTrue(item.listText.contains(url.lastPathComponent))
+  }
+
+  func testMultipleFilesKeepCompleteFileList() async throws {
+    let first = try imageFile()
+    let second = try imageFile()
+    let item = decorator([(.fileURL, first.dataRepresentation), (.fileURL, second.dataRepresentation)])
+    await item.sizeImages()
+    XCTAssertNil(item.thumbnailImage)
+    XCTAssertTrue(item.listText.contains(first.lastPathComponent))
+    XCTAssertTrue(item.listText.contains(second.lastPathComponent))
+  }
+
+  func testTextPathAndRemoteURLRemainText() async throws {
+    let url = try imageFile()
+    for text in [url.path, url.absoluteString, "https://example.com/image.png"] {
+      let item = decorator([(.string, Data(text.utf8))])
+      XCTAssertTrue(item.item.previewImageSources.isEmpty)
+      await item.sizeImages()
+      XCTAssertNil(item.thumbnailImage)
+    }
+    let remote = decorator([(.fileURL, Data("https://example.com/image.png".utf8))])
+    XCTAssertTrue(remote.item.previewImageSources.isEmpty)
+  }
+
+  func testLargeImageIsDownsampledAndReportsOriginalDimensions() async throws {
+    let item = decorator([(.png, try imageData(width: 4096, height: 1024))])
+    await item.sizeImages()
+    XCTAssertEqual(item.imagePixelSize, NSSize(width: 4096, height: 1024))
+    let thumbnail = try XCTUnwrap(item.thumbnailImage)
+    XCTAssertEqual(thumbnail.size, NSSize(width: 2048, height: 512))
+  }
+
+  func testCleanupAllowsThumbnailRegeneration() async throws {
+    let item = decorator([(.png, try imageData())])
+    await item.sizeImages()
+    XCTAssertNotNil(item.thumbnailImage)
+    item.cleanupImages()
+    XCTAssertNil(item.thumbnailImage)
+    XCTAssertNil(item.thumbnailImageGenerationTask)
+    await item.sizeImages()
+    XCTAssertNotNil(item.thumbnailImage)
+  }
+
+  func testCancelledLoadCanRestart() async throws {
+    let item = decorator([(.png, try imageData())])
+    item.ensureThumbnailImage()
+    item.cleanupImages()
+    await item.sizeImages()
+    XCTAssertNotNil(item.thumbnailImage)
+  }
+
+  func testReadOnlyBookmarkRestoresImageWithoutChangingFileContents() async throws {
+    let url = try imageFile()
+    let item = decorator([(.fileURL, url.dataRepresentation)])
+    item.item.rememberPreviewImageAccess(from: [url])
+    XCTAssertNotNil(item.item.previewImageBookmark)
+    let restored = HistoryItemDecorator(item.item)
+    await restored.sizeImages()
+    XCTAssertNotNil(restored.thumbnailImage)
+    XCTAssertEqual(item.item.contents.count, 1)
+    XCTAssertEqual(item.item.contents.first?.value, url.dataRepresentation)
+  }
+
+  func testUnrelatedFileCannotSupplyPreviewBookmark() throws {
+    let first = try imageFile()
+    let second = try imageFile()
+    let item = decorator([(.fileURL, first.dataRepresentation)])
+    item.item.rememberPreviewImageAccess(from: [second])
+    XCTAssertNil(item.item.previewImageBookmark)
+  }
+
+  func testBrokenBookmarkFallsBackToAccessibleOriginalURL() async throws {
+    let url = try imageFile()
+    let item = decorator([(.fileURL, url.dataRepresentation)])
+    item.item.previewImageBookmark = Data("invalid bookmark".utf8)
+    await item.sizeImages()
+    XCTAssertNotNil(item.thumbnailImage)
+    XCTAssertEqual(item.item.previewImageBookmark, Data("invalid bookmark".utf8))
+  }
+}
+
+@MainActor
 class FloatingPanelSizingTests: XCTestCase {
   func testResizeDelegateAllowsNarrowerWindowWithFixedWidthContent() {
     withRestoredWindowState {
@@ -494,5 +668,101 @@ class FloatingPanelSizingTests: XCTestCase {
     popup.extraTopHeight = 0
     popup.extraBottomHeight = 0
     test()
+  }
+}
+
+@MainActor
+class ImageRowLayoutTests: XCTestCase {
+  func testWideImageFitsAvailableWidthWithoutCropping() {
+    let size = renderedSize(sourceSize: CGSize(width: 2_000, height: 1_000), width: 500, maximumHeight: 300)
+
+    XCTAssertEqual(size.width, 500, accuracy: 1)
+    XCTAssertEqual(size.height, 250, accuracy: 1)
+  }
+
+  func testPortraitImageStopsAtMaximumHeight() {
+    let sourceSize = CGSize(width: 1_000, height: 2_000)
+    let fitted = ListItemImageLayout.fittedSize(sourceSize: sourceSize, availableWidth: 500, maximumHeight: 300)
+    let rendered = renderedSize(sourceSize: sourceSize, width: 500, maximumHeight: 300)
+
+    XCTAssertEqual(fitted, CGSize(width: 150, height: 300))
+    XCTAssertEqual(rendered.width, 500, accuracy: 1)
+    XCTAssertEqual(rendered.height, 300, accuracy: 1)
+  }
+
+  func testWindowWidthChangeRecalculatesImageRowHeight() {
+    let sourceSize = CGSize(width: 1_200, height: 800)
+    let wide = renderedSize(sourceSize: sourceSize, width: 600, maximumHeight: 600)
+    let narrow = renderedSize(sourceSize: sourceSize, width: 240, maximumHeight: 600)
+
+    XCTAssertEqual(wide.width, 600, accuracy: 1)
+    XCTAssertEqual(wide.height, 400, accuracy: 1)
+    XCTAssertEqual(narrow.width, 240, accuracy: 1)
+    XCTAssertEqual(narrow.height, 160, accuracy: 1)
+    XCTAssertLessThan(narrow.height, wide.height)
+  }
+
+  func testMaximumHeightSettingChangesRenderedHeight() {
+    let sourceSize = CGSize(width: 1_000, height: 2_000)
+    let compact = renderedSize(sourceSize: sourceSize, width: 500, maximumHeight: 100)
+    let large = renderedSize(sourceSize: sourceSize, width: 500, maximumHeight: 300)
+
+    XCTAssertEqual(compact.height, 100, accuracy: 1)
+    XCTAssertEqual(large.height, 300, accuracy: 1)
+  }
+
+  func testSmallImageKeepsItsNaturalHeightInWideRow() {
+    let sourceSize = CGSize(width: 96, height: 64)
+    let fitted = ListItemImageLayout.fittedSize(sourceSize: sourceSize, availableWidth: 500, maximumHeight: 300)
+    let rendered = renderedSize(sourceSize: sourceSize, width: 500, maximumHeight: 300)
+
+    XCTAssertEqual(fitted, sourceSize)
+    XCTAssertEqual(rendered.width, 500, accuracy: 1)
+    XCTAssertEqual(rendered.height, 64, accuracy: 1)
+  }
+
+  func testUnboundedWidthStillHonorsMaximumHeightWithoutUpscaling() {
+    let sourceSize = CGSize(width: 800, height: 400)
+    for width in [nil, CGFloat.infinity] as [CGFloat?] {
+      let fitted = ListItemImageLayout.fittedSize(
+        sourceSize: sourceSize,
+        availableWidth: width,
+        maximumHeight: 300
+      )
+      XCTAssertEqual(fitted, CGSize(width: 600, height: 300))
+    }
+  }
+
+  func testZeroOrInvalidSourceAndAvailableSpaceHaveNoImageSize() {
+    for sourceSize in [CGSize.zero, CGSize(width: CGFloat.infinity, height: 100), CGSize(width: 100, height: -1)] {
+      XCTAssertEqual(
+        ListItemImageLayout.fittedSize(sourceSize: sourceSize, availableWidth: 500, maximumHeight: 300),
+        .zero
+      )
+    }
+    for width: CGFloat in [0, -100] {
+      XCTAssertEqual(
+        ListItemImageLayout.fittedSize(
+          sourceSize: CGSize(width: 200, height: 100),
+          availableWidth: width,
+          maximumHeight: 300
+        ),
+        .zero
+      )
+    }
+  }
+
+  private func renderedSize(sourceSize: CGSize, width: CGFloat, maximumHeight: CGFloat) -> CGSize {
+    let image = NSImage(size: sourceSize, flipped: false) { bounds in
+      NSColor.systemBlue.setFill()
+      NSBezierPath(rect: bounds).fill()
+      return true
+    }
+    let view = NSHostingView(rootView:
+      ListItemImageView(image: image, maximumHeight: maximumHeight)
+        .frame(width: width, alignment: .leading)
+    )
+    view.layoutSubtreeIfNeeded()
+    return view.fittingSize
   }
 }

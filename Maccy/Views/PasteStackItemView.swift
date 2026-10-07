@@ -46,5 +46,8 @@ struct PasteStackItemView: View {
     ) {
       Text(verbatim: item.listText)
     }
+    .onAppear {
+      if index != nil { item.ensureThumbnailImage() }
+    }
   }
 }

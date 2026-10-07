@@ -2,6 +2,7 @@ import AppKit
 import Defaults
 import Sauce
 import SwiftData
+import UniformTypeIdentifiers
 import Vision
 
 @Model
@@ -68,6 +69,8 @@ class HistoryItem {
   var numberOfCopies: Int = 1
   var pin: String?
   var title = ""
+  // Read-only access to a copied image file; separate from the original pasteboard contents.
+  var previewImageBookmark: Data?
 
   @Relationship(deleteRule: .cascade, inverse: \HistoryItemContent.item)
   var contents: [HistoryItemContent] = []
@@ -170,6 +173,32 @@ class HistoryItem {
     }
 
     return data
+  }
+
+  /// Sources used only for rendering. File copies must remain file copies when pasted.
+  var previewImageSources: [ClipboardImageSource] {
+    var sources: [ClipboardImageSource] = Self.imageTypes.flatMap { type in
+      allContentData([type]).filter { !$0.isEmpty }.map { .data($0) }
+    }
+    // Multiple copied files keep their full file list; a single thumbnail would hide that information.
+    let urls = fileURLs
+    if urls.count == 1, let url = urls.first, url.isFileURL,
+       UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true {
+      sources.append(.file(url, bookmark: previewImageBookmark))
+    }
+    return sources
+  }
+
+  func rememberPreviewImageAccess(from urls: [URL]) {
+    guard fileURLs.count == 1, let copiedURL = fileURLs.first,
+          UTType(filenameExtension: copiedURL.pathExtension)?.conforms(to: .image) == true,
+          let url = urls.first(where: { $0.standardizedFileURL == copiedURL.standardizedFileURL }) else { return }
+    let accessed = url.startAccessingSecurityScopedResource()
+    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+    if let bookmark = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+                                           includingResourceValuesForKeys: nil, relativeTo: nil) {
+      previewImageBookmark = bookmark
+    }
   }
 
   var image: NSImage? {

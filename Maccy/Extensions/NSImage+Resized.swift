@@ -1,4 +1,77 @@
 import AppKit.NSImage
+import ImageIO
+
+/// Display-only sources. Never add a rendered thumbnail to the clipboard payload.
+enum ClipboardImageSource: Sendable {
+  case data(Data)
+  case file(URL, bookmark: Data? = nil)
+
+  struct Preview: Sendable {
+    let image: CGImage
+    let pixelSize: CGSize
+    let refreshedBookmark: Data?
+  }
+
+  @concurrent
+  nonisolated static func loadFirst(_ sources: [Self], maxPixelSize: Int = 2048) async -> Preview? {
+    for source in sources {
+      guard !Task.isCancelled else { return nil }
+      if let preview = source.load(maxPixelSize: maxPixelSize) { return preview }
+    }
+    return nil
+  }
+
+  nonisolated private func load(maxPixelSize: Int) -> Preview? {
+    let options = [kCGImageSourceShouldCache: false] as CFDictionary
+    let source: CGImageSource?
+    var scopedURL: URL?
+    var refreshedBookmark: Data?
+    defer { scopedURL?.stopAccessingSecurityScopedResource() }
+
+    switch self {
+    case .data(let data):
+      source = CGImageSourceCreateWithData(data as CFData, options)
+    case .file(let originalURL, let bookmark):
+      var url = originalURL
+      var stale = false
+      if let bookmark {
+        if let resolved = try? URL(resolvingBookmarkData: bookmark,
+                                   options: [.withSecurityScope, .withoutUI, .withoutMounting],
+                                   relativeTo: nil, bookmarkDataIsStale: &stale) {
+          url = resolved
+        }
+      }
+      // Only local, regular files. Never load remote URLs or download cloud placeholders.
+      guard url.isFileURL, url.host == nil || url.host == "" || url.host == "localhost" else { return nil }
+      if url.startAccessingSecurityScopedResource() { scopedURL = url }
+      if stale {
+        refreshedBookmark = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+                                                  includingResourceValuesForKeys: nil, relativeTo: nil)
+      }
+      guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isUbiquitousItemKey,
+                                                          .ubiquitousItemDownloadingStatusKey]),
+            values.isRegularFile == true,
+            values.isUbiquitousItem != true || values.ubiquitousItemDownloadingStatus == .current else { return nil }
+      source = CGImageSourceCreateWithURL(url as CFURL, options)
+    }
+
+    guard let source,
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+          let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+          let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixelSize),
+            kCGImageSourceShouldCacheImmediately: true
+          ] as CFDictionary) else { return nil }
+
+    let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+    let size = CGSize(width: width.doubleValue, height: height.doubleValue)
+    let orientedSize = (5...8).contains(orientation) ? CGSize(width: size.height, height: size.width) : size
+    return Preview(image: image, pixelSize: orientedSize, refreshedBookmark: refreshedBookmark)
+  }
+}
 
 // Based on https://stackoverflow.com/questions/73062803/resizing-nsimage-keeping-aspect-ratio-reducing-the-image-size-while-trying-to-sc.
 extension NSImage {

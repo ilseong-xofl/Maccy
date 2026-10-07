@@ -115,13 +115,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       }
     }
 
-    Task {
-      for await _ in Defaults.updates(.imageMaxHeight, initial: false) {
-        for item in items {
-          await item.cleanupImages()
-        }
-      }
-    }
+    // Image height is a live layout constraint. Keep the decoded thumbnail when it changes.
   }
 
   @MainActor
@@ -174,6 +168,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
         transferContents(from: existingHistoryItem, to: item)
       }
       item.firstCopiedAt = existingHistoryItem.firstCopiedAt
+      if item.previewImageBookmark == nil {
+        item.previewImageBookmark = existingHistoryItem.previewImageBookmark
+      }
       item.numberOfCopies += existingHistoryItem.numberOfCopies
       item.pin = existingHistoryItem.pin
       item.title = existingHistoryItem.title

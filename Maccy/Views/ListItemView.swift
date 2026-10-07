@@ -46,6 +46,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   @ViewBuilder var title: () -> Title
 
   @Default(.showApplicationIcons) private var showIcons
+  @Default(.imageMaxHeight) private var imageMaxHeight
   @Environment(AppState.self) private var appState
   @Environment(ModifierFlags.self) private var modifierFlags
 
@@ -78,11 +79,13 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       }
 
       if let image {
-        Image(nsImage: image)
+        ListItemImageView(image: image, maximumHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
           .accessibilityIdentifier("copy-history-item")
           .accessibilityHidden(true)
           .padding(.trailing, 5)
           .padding(.vertical, 5)
+          .frame(maxWidth: .infinity, alignment: .center)
+          .layoutPriority(1)
       } else {
         ListItemTitleView(attributedTitle: attributedTitle, maxLines: maxTextLines, title: title)
           .accessibilityHidden(true)
@@ -143,5 +146,50 @@ struct ListItemView<Title: View, ID: Hashable>: View {
     .accessibilityValue(Text(displaySelectionIndex ?? ""))
     .hoverSelectionId(selectionId)
     .help(help ?? "")
+  }
+}
+
+struct ListItemImageView: View {
+  var image: NSImage
+  var maximumHeight: CGFloat
+
+  var body: some View {
+    ListItemImageLayout(sourceSize: image.size, maximumHeight: maximumHeight) {
+      Image(nsImage: image)
+        .resizable()
+        .aspectRatio(contentMode: .fit)
+    }
+  }
+}
+
+struct ListItemImageLayout: Layout {
+  var sourceSize: CGSize
+  var maximumHeight: CGFloat
+
+  static func fittedSize(sourceSize: CGSize, availableWidth: CGFloat?, maximumHeight: CGFloat) -> CGSize {
+    guard sourceSize.width.isFinite, sourceSize.height.isFinite,
+          sourceSize.width > 0, sourceSize.height > 0,
+          maximumHeight.isFinite, maximumHeight > 0 else {
+      return .zero
+    }
+
+    let width = availableWidth.flatMap { $0.isFinite ? max($0, 0) : nil } ?? sourceSize.width
+    // Never enlarge a small source image. The row height follows the actual
+    // fitted image, rather than reserving the maximum height for every item.
+    let scale = min(1, width / sourceSize.width, maximumHeight / sourceSize.height)
+    return CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
+  }
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    Self.fittedSize(sourceSize: sourceSize, availableWidth: proposal.width, maximumHeight: maximumHeight)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    let size = Self.fittedSize(
+      sourceSize: sourceSize,
+      availableWidth: bounds.width,
+      maximumHeight: min(maximumHeight, bounds.height)
+    )
+    subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(size))
   }
 }

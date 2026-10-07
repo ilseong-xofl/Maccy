@@ -233,6 +233,14 @@ class Clipboard {
       try? History.shared.insertIntoStorage(historyItem)
     }
 
+    // Reading NSURL objects redeems the pasteboard's file-access grant. Preserve only
+    // read access for a single image so its preview can be loaded after a restart.
+    if historyItem.fileURLs.count == 1,
+       let urls = pasteboard.readObjects(forClasses: [NSURL.self],
+                                        options: [.urlReadingFileURLsOnly: true]) as? [URL] {
+      historyItem.rememberPreviewImageAccess(from: urls)
+    }
+
     historyItem.application = sourceApp?.bundleIdentifier
     historyItem.title = historyItem.generateTitle()
 
