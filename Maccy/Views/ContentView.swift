@@ -34,6 +34,8 @@ struct ContentView: View {
 
               FooterView(footer: appState.footer)
             }
+            // Switch filters immediately, without animating all rows and the footer together.
+            .animation(nil, value: appState.history.filter)
             .animation(.default.speed(3), value: appState.history.items)
             .animation(
               .default.speed(3),

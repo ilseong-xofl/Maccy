@@ -68,6 +68,7 @@ struct HistoryListView: View {
         }
         .padding(.top, topPadding)
         .padding(.bottom, bottomPadding)
+        .background(PersistentHistoryScroller())
         .task(id: appState.navigator.scrollTarget) {
           guard appState.navigator.scrollTarget != nil else { return }
 
@@ -139,6 +140,45 @@ struct HistoryListView: View {
       // contribute a fixed minimum height outside the scroll view.
       appState.popup.extraTopHeight = 0
       appState.popup.extraBottomHeight = 0
+    }
+  }
+}
+
+// Keep the native scrollbar gutter even when a filter contains no scrollable rows.
+// SwiftUI's .visible policy alone still follows the system's auto-hide preference.
+private struct PersistentHistoryScroller: NSViewRepresentable {
+  func makeNSView(context: Context) -> ScrollerConfigurationView {
+    ScrollerConfigurationView()
+  }
+
+  func updateNSView(_ nsView: ScrollerConfigurationView, context: Context) {
+    nsView.configureWhenAttached()
+  }
+
+  final class ScrollerConfigurationView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      configureWhenAttached()
+    }
+
+    override func viewDidMoveToSuperview() {
+      super.viewDidMoveToSuperview()
+      configureWhenAttached()
+    }
+
+    func configureWhenAttached() {
+      configureScrollView()
+      // SwiftUI may finish connecting or updating its scroll view after this marker.
+      DispatchQueue.main.async { [weak self] in self?.configureScrollView() }
+    }
+
+    private func configureScrollView() {
+      guard let scrollView = enclosingScrollView else { return }
+      if scrollView.scrollerStyle != .legacy { scrollView.scrollerStyle = .legacy }
+      if !scrollView.hasVerticalScroller { scrollView.hasVerticalScroller = true }
+      if scrollView.autohidesScrollers { scrollView.autohidesScrollers = false }
     }
   }
 }

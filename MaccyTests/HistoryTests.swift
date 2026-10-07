@@ -1304,6 +1304,100 @@ final class FavoriteHistoryTests: XCTestCase {
     }
   }
 
+  func testHistoryScrollerKeepsContentWidthAndGutterAcrossEmptyAndOverflowingFilters() async throws {
+    try await withHistory { history in
+      let popup = AppState.shared.popup
+      let savedHeight = popup.height
+      let savedTopHeight = popup.extraTopHeight
+      let savedBottomHeight = popup.extraBottomHeight
+      history.filter = .favorites
+      let hosting = NSHostingView(rootView: HistoryScrollerLayoutFixture())
+      hosting.sizingOptions = []
+      let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 320, height: 72),
+                            styleMask: [.borderless], backing: .buffered, defer: false)
+      window.isReleasedWhenClosed = false
+      window.contentView = hosting
+      hosting.frame = NSRect(x: 0, y: 0, width: 320, height: 72)
+      defer {
+        window.contentView = nil
+        window.close()
+        popup.height = savedHeight
+        popup.extraTopHeight = savedTopHeight
+        popup.extraBottomHeight = savedBottomHeight
+      }
+
+      try await settleHistoryScroller(hosting)
+      let empty = try historyScrollerMetrics(in: hosting)
+      XCTAssertLessThanOrEqual(empty.documentHeight, empty.viewportHeight + 0.5)
+      XCTAssertGreaterThan(empty.scrollerFrame.width, 0)
+
+      history.filter = .history
+      try await settleHistoryScroller(hosting)
+      let overflowing = try historyScrollerMetrics(in: hosting)
+      XCTAssertGreaterThan(overflowing.documentHeight, overflowing.viewportHeight + 1)
+      XCTAssertEqual(overflowing.contentWidth, empty.contentWidth, accuracy: 0.5)
+      XCTAssertEqual(overflowing.scrollerFrame.minX, empty.scrollerFrame.minX, accuracy: 0.5)
+      XCTAssertEqual(overflowing.scrollerFrame.width, empty.scrollerFrame.width, accuracy: 0.5)
+
+      history.filter = .favorites
+      try await settleHistoryScroller(hosting)
+      let emptyAgain = try historyScrollerMetrics(in: hosting)
+      XCTAssertLessThanOrEqual(emptyAgain.documentHeight, emptyAgain.viewportHeight + 0.5)
+      XCTAssertEqual(emptyAgain.contentWidth, empty.contentWidth, accuracy: 0.5)
+      XCTAssertEqual(emptyAgain.scrollerFrame.minX, empty.scrollerFrame.minX, accuracy: 0.5)
+      XCTAssertEqual(emptyAgain.scrollerFrame.width, empty.scrollerFrame.width, accuracy: 0.5)
+      XCTAssertFalse(window.isVisible)
+    }
+  }
+
+  private struct HistoryScrollerLayoutFixture: View {
+    @State private var appState = AppState.shared
+    @State private var modifierFlags = ModifierFlags()
+    @FocusState private var keyboardFocus: ClipboardKeyboardFocus?
+
+    var body: some View {
+      HistoryListView(searchQuery: $appState.history.searchQuery, keyboardFocus: $keyboardFocus)
+        .environment(appState)
+        .environment(modifierFlags)
+        .frame(width: 320, height: 72)
+    }
+  }
+
+  private struct HistoryScrollerMetrics {
+    let contentWidth: CGFloat
+    let viewportHeight: CGFloat
+    let documentHeight: CGFloat
+    let scrollerFrame: CGRect
+  }
+
+  private func settleHistoryScroller(_ hosting: NSView) async throws {
+    // Let SwiftUI install its native scroll view and complete the marker's deferred configuration.
+    for _ in 0..<5 {
+      await withCheckedContinuation { continuation in
+        DispatchQueue.main.async { continuation.resume() }
+      }
+      hosting.layoutSubtreeIfNeeded()
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    hosting.layoutSubtreeIfNeeded()
+  }
+
+  private func historyScrollerMetrics(in hosting: NSView) throws -> HistoryScrollerMetrics {
+    func descendantScrollView(in view: NSView) -> NSScrollView? {
+      if let scrollView = view as? NSScrollView { return scrollView }
+      return view.subviews.lazy.compactMap { descendantScrollView(in: $0) }.first
+    }
+    let scrollView = try XCTUnwrap(descendantScrollView(in: hosting))
+    let document = try XCTUnwrap(scrollView.documentView)
+    let scroller = try XCTUnwrap(scrollView.verticalScroller)
+    return HistoryScrollerMetrics(
+      contentWidth: scrollView.contentView.bounds.width,
+      viewportHeight: scrollView.contentView.bounds.height,
+      documentHeight: document.frame.height,
+      scrollerFrame: hosting.convert(scroller.bounds, from: scroller)
+    )
+  }
+
   private final class NonPresentingTestPanel: FloatingPanel<EmptyView> {
     // Exercise open/close state transitions without ordering a test window on screen.
     override func orderFrontRegardless() {}
