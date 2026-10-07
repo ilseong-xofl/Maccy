@@ -18,20 +18,8 @@ struct HistoryListView: View {
   private var unpinnedItems: [HistoryItemDecorator] {
     appState.history.unpinnedItems
   }
-  private var showPinsSeparator: Bool {
-    pinsVisible && !unpinnedItems.isEmpty
-  }
-
   private var pinsVisible: Bool {
     return !pinnedItems.isEmpty
-  }
-
-  private var pasteStackVisible: Bool {
-    if let stack = appState.history.pasteStack,
-       !stack.items.isEmpty {
-      return true
-    }
-    return false
   }
 
   private var topPadding: CGFloat {
@@ -44,19 +32,6 @@ struct HistoryListView: View {
       : (Popup.verticalSeparatorPadding - 1)
   }
 
-  private func topSeparator() -> some View {
-    Divider()
-      .padding(.horizontal, Popup.horizontalSeparatorPadding)
-      .padding(.top, Popup.verticalSeparatorPadding)
-  }
-
-  @ViewBuilder
-  private func bottomSeparator() -> some View {
-    Divider()
-      .padding(.horizontal, Popup.horizontalSeparatorPadding)
-      .padding(.bottom, Popup.verticalSeparatorPadding)
-  }
-
   @ViewBuilder
   private func separator() -> some View {
     Divider()
@@ -67,55 +42,32 @@ struct HistoryListView: View {
   var body: some View {
     let topPinsVisible = pinTo == .top && pinsVisible
     let bottomPinsVisible = pinTo == .bottom && pinsVisible
-    let historyEmpty = unpinnedItems.isEmpty
-    let topSeparatorVisible = !historyEmpty && (topPinsVisible || pasteStackVisible)
-    let bottomSeparatorVisible = !historyEmpty && bottomPinsVisible
-    let scrollTopPadding = topSeparatorVisible ? Popup.verticalSeparatorPadding : topPadding
-    let scrollBottomPadding = bottomSeparatorVisible ? Popup.verticalSeparatorPadding : bottomPadding
-
     ScrollView {
       ScrollViewReader { proxy in
         LazyVStack(spacing: 0) {
-          VStack(spacing: 0) {
-            if let stack = appState.history.pasteStack,
-               !stack.items.isEmpty {
-              PasteStackView(stack: stack)
+          if let stack = appState.history.pasteStack,
+             !stack.items.isEmpty {
+            PasteStackView(stack: stack)
 
-              if topPinsVisible {
-                separator()
-              }
-            }
-
-            if topPinsVisible {
-              PinsView(items: pinnedItems)
-            }
-
-            if topSeparatorVisible {
-              topSeparator()
-            } else if showFooter && historyEmpty {
-              Spacer()
-                .frame(height: Popup.verticalSeparatorPadding)
+            if pinsVisible || !unpinnedItems.isEmpty {
+              separator()
             }
           }
-          .padding(.top, topSeparatorVisible ? topPadding : 0)
+
+          if topPinsVisible {
+            PinsView(items: pinnedItems)
+          }
 
           MultipleSelectionListView(items: unpinnedItems) { previous, item, next, index in
             HistoryItemView(item: item, previous: previous, next: next, index: index)
           }
-          .padding(.top, scrollTopPadding)
-          .padding(.bottom, scrollBottomPadding)
 
-          VStack(spacing: 0) {
-            if bottomSeparatorVisible {
-              bottomSeparator()
-            }
-
-            if bottomPinsVisible {
-              PinsView(items: pinnedItems)
-            }
+          if bottomPinsVisible {
+            PinsView(items: pinnedItems)
           }
-          .padding(.bottom, bottomPinsVisible ? bottomPadding : 0)
         }
+        .padding(.top, topPadding)
+        .padding(.bottom, bottomPadding)
         .task(id: appState.navigator.scrollTarget) {
           guard appState.navigator.scrollTarget != nil else { return }
 
@@ -154,8 +106,8 @@ struct HistoryListView: View {
         }
       }
       .contentMargins(.leading, 10, for: .scrollIndicators)
-      .contentMargins(.top, scrollTopPadding, for: .scrollIndicators)
-      .contentMargins(.bottom, scrollBottomPadding, for: .scrollIndicators)
+      .contentMargins(.top, topPadding, for: .scrollIndicators)
+      .contentMargins(.bottom, bottomPadding, for: .scrollIndicators)
     }
     .accessibilityIdentifier("history-scroll-view")
     .onAppear {

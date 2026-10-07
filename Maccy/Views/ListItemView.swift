@@ -42,6 +42,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   var attributedTitle: AttributedString?
   var shortcuts: [KeyShortcut]
   var isSelected: Bool
+  var isPinned: Bool = false
   var selectionIndex: Int?
   var help: LocalizedStringKey?
   var selectionAppearance: SelectionAppearance = .none
@@ -153,6 +154,8 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       .fixedSize(horizontal: true, vertical: false)
       .padding(.trailing, 10)
     }
+    // Reserve a narrow corner for the pin without covering short text or app icons.
+    .padding(.leading, isPinned ? 14 : 0)
     .frame(minHeight: Popup.itemHeight)
     .id(id)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -166,6 +169,17 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       isSelected ? Color.accentColor.opacity(0.8) : .white.opacity(0.001),
       in: selectionAppearance.rect(cornerRadius: Popup.cornerRadius)
     )
+    .overlay(alignment: .topLeading) {
+      if isPinned {
+        Image(systemName: "pin.fill")
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(.red)
+          .padding(.leading, 4)
+          .padding(.top, 6)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+      }
+    }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(Text(accessibilityLabel))
     .accessibilityAddTraits(isSelected ? .isSelected : [])
