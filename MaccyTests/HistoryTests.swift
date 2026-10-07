@@ -1061,6 +1061,40 @@ final class FavoriteHistoryTests: XCTestCase {
     }
   }
 
+  func testPopupFilterCycleKeepsLeadingFavoriteWithoutCopyingOrAdvancingSelection() async throws {
+    try await withHistory { history in
+      let originalItems = history.items.toArray()
+      let first = originalItems[0]
+      let ordinary = originalItems[1]
+      let otherFavorite = originalItems[2]
+      history.toggleFavorite(first)
+      history.toggleFavorite(otherFavorite)
+      let appState = AppState.shared
+      appState.navigator.select(item: first)
+      let pasteboardChangeCount = NSPasteboard.general.changeCount
+
+      appState.popup.perform(.cycleFilter)
+
+      XCTAssertEqual(history.filter, .favorites)
+      XCTAssertEqual(history.items.map(\.id), [first.id, otherFavorite.id])
+      XCTAssertEqual(appState.navigator.leadHistoryItem?.id, first.id)
+      XCTAssertEqual(appState.navigator.selection.items.map(\.id), [first.id])
+      XCTAssertTrue(ordinary.shortcuts.isEmpty)
+      XCTAssertEqual(first.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
+      XCTAssertEqual(otherFavorite.shortcuts.map(\.key), KeyShortcut.create(character: "2").map(\.key))
+
+      appState.popup.perform(.cycleFilter)
+
+      XCTAssertEqual(history.filter, .history)
+      XCTAssertEqual(history.items.map(\.id), originalItems.map(\.id))
+      XCTAssertEqual(appState.navigator.leadHistoryItem?.id, first.id)
+      XCTAssertEqual(appState.navigator.selection.items.map(\.id), [first.id])
+      XCTAssertEqual(ordinary.shortcuts.map(\.key), KeyShortcut.create(character: "2").map(\.key))
+      XCTAssertEqual(otherFavorite.shortcuts.map(\.key), KeyShortcut.create(character: "3").map(\.key))
+      XCTAssertEqual(NSPasteboard.general.changeCount, pasteboardChangeCount)
+    }
+  }
+
   func testFilterChangeRejectsCapturedShortcutAndPreservesUnfilteredLatestItem() async throws {
     try await withHistory { history in
       let latest = try XCTUnwrap(history.firstUnpinnedItem)

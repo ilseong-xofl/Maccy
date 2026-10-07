@@ -2102,3 +2102,130 @@ class ExplicitSearchKeyboardTests: XCTestCase {
     XCTAssertFalse(appState.searchVisible)
   }
 }
+
+
+@MainActor
+final class PopupShortcutTests: XCTestCase {
+  private let defaultShortcut = KeyboardShortcuts.Shortcut(.c, modifiers: [.command, .shift])
+
+  func testHeldDefaultShortcutCyclesForEachDistinctKeyPress() {
+    var state = PopupState.holdingModifiers
+    for _ in 0..<3 {
+      XCTAssertEqual(state.action(for: event(flags: [.command, .shift]), shortcut: defaultShortcut), .cycleFilter)
+      XCTAssertEqual(state, .holdingModifiers)
+    }
+    // The physical shortcut remains valid while a non-Latin input source is selected.
+    XCTAssertEqual(state.action(for: event(flags: [.command, .shift], characters: "ㅊ"),
+                                shortcut: defaultShortcut), .cycleFilter)
+  }
+
+  func testKeyUpDoesNotEndHeldSessionOrProduceAnAction() {
+    var state = PopupState.holdingModifiers
+    XCTAssertNil(state.action(for: event(type: .keyUp, flags: [.command, .shift]), shortcut: defaultShortcut))
+    XCTAssertEqual(state, .holdingModifiers)
+    XCTAssertEqual(state.action(for: event(flags: [.command, .shift]), shortcut: defaultShortcut), .cycleFilter)
+  }
+
+  func testReleasingAllModifiersReturnsToToggleThenNextShortcutCloses() {
+    var state = PopupState.holdingModifiers
+    XCTAssertNil(state.action(for: event(type: .flagsChanged, flags: [], keyCode: 55), shortcut: defaultShortcut))
+    XCTAssertEqual(state, .toggle)
+    XCTAssertEqual(state.action(for: event(flags: [.command, .shift]), shortcut: defaultShortcut), .close)
+  }
+
+  func testPartialModifierReleaseDoesNotCloseCycleOrResetHeldSession() {
+    var state = PopupState.holdingModifiers
+    XCTAssertNil(state.action(for: event(type: .flagsChanged, flags: [.command], keyCode: 56),
+                              shortcut: defaultShortcut))
+    XCTAssertEqual(state, .holdingModifiers)
+    XCTAssertNil(state.action(for: event(flags: [.command]), shortcut: defaultShortcut))
+    XCTAssertEqual(state, .holdingModifiers)
+    XCTAssertEqual(state.action(for: event(flags: [.command, .shift]), shortcut: defaultShortcut), .cycleFilter)
+  }
+
+  func testAutoRepeatIsConsumedWithoutCyclingClosingOrChangingState() {
+    for initialState: PopupState in [.holdingModifiers, .toggle] {
+      var state = initialState
+      for _ in 0..<3 {
+        XCTAssertEqual(state.action(for: event(flags: [.command, .shift], isRepeat: true),
+                                    shortcut: defaultShortcut), .consume)
+        XCTAssertEqual(state, initialState)
+      }
+    }
+  }
+
+  func testUnrelatedKeysPartialExtraModifiersAndDisabledShortcutPassThrough() {
+    for initialState: PopupState in [.holdingModifiers, .toggle] {
+      var state = initialState
+      for flags: NSEvent.ModifierFlags in [[], [.command], [.shift], [.command, .shift, .option]] {
+        XCTAssertNil(state.action(for: event(flags: flags), shortcut: defaultShortcut))
+        XCTAssertEqual(state, initialState)
+      }
+      XCTAssertNil(state.action(for: event(flags: [.command, .shift], keyCode: 2, characters: "d"),
+                                shortcut: defaultShortcut))
+      XCTAssertNil(state.action(for: event(flags: [.command, .shift]), shortcut: nil))
+      XCTAssertEqual(state, initialState)
+    }
+  }
+
+  func testCustomTripleModifierShortcutRequiresItsExactChord() {
+    let shortcut = KeyboardShortcuts.Shortcut(.c, modifiers: [.control, .option, .command])
+    var state = PopupState.holdingModifiers
+    XCTAssertEqual(state.action(for: event(flags: [.control, .option, .command]), shortcut: shortcut), .cycleFilter)
+    XCTAssertNil(state.action(for: event(flags: [.control, .command]), shortcut: shortcut))
+    XCTAssertNil(state.action(for: event(flags: [.control, .option, .command, .shift]), shortcut: shortcut))
+    XCTAssertNil(state.action(for: event(type: .flagsChanged, flags: [.control, .option], keyCode: 55),
+                              shortcut: shortcut))
+    XCTAssertEqual(state, .holdingModifiers)
+    XCTAssertNil(state.action(for: event(type: .flagsChanged, flags: [], keyCode: 59), shortcut: shortcut))
+    XCTAssertEqual(state, .toggle)
+    XCTAssertEqual(state.action(for: event(flags: [.control, .option, .command]), shortcut: shortcut), .close)
+  }
+
+  func testCustomLetterKeyUsesConfiguredKeyCodeInsteadOfDefaultC() {
+    let shortcut = KeyboardShortcuts.Shortcut(.d, modifiers: [.control, .option])
+    var state = PopupState.holdingModifiers
+    XCTAssertNil(state.action(for: event(flags: [.control, .option]), shortcut: shortcut))
+    XCTAssertEqual(state.action(for: event(flags: [.control, .option], keyCode: 2, characters: "d"),
+                                shortcut: shortcut), .cycleFilter)
+    XCTAssertNil(state.action(for: event(type: .flagsChanged, flags: []), shortcut: shortcut))
+    XCTAssertEqual(state.action(for: event(flags: [.control, .option], keyCode: 2, characters: "d"),
+                                shortcut: shortcut), .close)
+  }
+
+  func testCapsLockKeypadAndFunctionBitsDoNotChangeEffectiveChordOrRelease() {
+    var state = PopupState.holdingModifiers
+    XCTAssertEqual(state.action(for: event(flags: [.command, .shift, .capsLock, .numericPad, .function]),
+                                shortcut: defaultShortcut), .cycleFilter)
+    XCTAssertNil(state.action(for: event(type: .flagsChanged, flags: [.capsLock, .numericPad, .function]),
+                              shortcut: defaultShortcut))
+    XCTAssertEqual(state, .toggle)
+    XCTAssertEqual(state.action(for: event(flags: [.command, .shift, .capsLock]), shortcut: defaultShortcut), .close)
+  }
+
+  func testPlainDigitsPassThroughUnlessTheyAreTheConfiguredToggleShortcut() {
+    var heldState = PopupState.holdingModifiers
+    XCTAssertNil(heldState.action(for: event(flags: [], keyCode: 18, characters: "1"), shortcut: defaultShortcut))
+    XCTAssertEqual(heldState, .holdingModifiers)
+    let shortcut = KeyboardShortcuts.Shortcut(.one, modifiers: [])
+    var state = PopupState.toggle
+    XCTAssertEqual(state.action(for: event(flags: [], keyCode: 18, characters: "1"), shortcut: shortcut), .close)
+    XCTAssertEqual(state.action(for: event(flags: [], keyCode: 18, characters: "1", isRepeat: true),
+                                shortcut: shortcut), .consume)
+    XCTAssertNil(state.action(for: event(flags: [], keyCode: 19, characters: "2"), shortcut: shortcut))
+    XCTAssertEqual(state, .toggle)
+  }
+
+  private func event(
+    type: NSEvent.EventType = .keyDown,
+    flags: NSEvent.ModifierFlags,
+    keyCode: UInt16 = 8,
+    characters: String = "c",
+    isRepeat: Bool = false
+  ) -> NSEvent {
+    NSEvent.keyEvent(
+      with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+      characters: characters, charactersIgnoringModifiers: characters, isARepeat: isRepeat, keyCode: keyCode
+    )!
+  }
+}

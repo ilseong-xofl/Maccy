@@ -495,79 +495,95 @@ class MaccyUITests: XCTestCase {
     assertPopupDismissed()
   }
 
-  func testOpenAndSelectSecondItem() throws {
-    // Simulate the popup hotkey press (Cmd + Shift + C).
+  func testHeldPopupShortcutShowsFavoritesWithoutCopyingOrClosingOnRelease() throws {
+    let pasteboardChangeCount = pasteboard.changeCount
     let cDown = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true)!
     cDown.flags = [.maskCommand, .maskShift]
     cDown.post(tap: .cghidEventTap)
-
     waitUntilPoppedUp()
 
     let cUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false)!
     cUp.flags = [.maskCommand, .maskShift]
     cUp.post(tap: .cghidEventTap)
-
-    // Press C 1 more time while keeping the modifier keys pressed
     cDown.post(tap: .cghidEventTap)
+    assertFilterSelected("filter-favorites")
+    assertNotExists(items[copy1])
+    assertNotExists(items[copy2])
 
-    // Release all modifiers keys and assert that the popup closes.
+    cUp.post(tap: .cghidEventTap)
     let modifiersUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Shift), keyDown: false)!
     modifiersUp.flags = []
     modifiersUp.post(tap: .cghidEventTap)
 
-    assertPopupDismissed()
-    assertPasteboardStringEquals(copy2)
+    waitUntilPoppedUp()
+    assertFilterSelected("filter-favorites")
+    assertPasteboardStringEquals(copy1)
+    XCTAssertEqual(pasteboard.changeCount, pasteboardChangeCount)
   }
 
-  func testOpenAndSelectThirdItem() throws {
+  func testHeldPopupShortcutCyclesBackToHistoryWithoutCopying() throws {
     copyToClipboard(copy3)
-
-    // Simulate the popup hotkey press (Cmd + Shift + C).
+    let pasteboardChangeCount = pasteboard.changeCount
     let cDown = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true)!
     cDown.flags = [.maskCommand, .maskShift]
     cDown.post(tap: .cghidEventTap)
-
     waitUntilPoppedUp()
 
     let cUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false)!
     cUp.flags = [.maskCommand, .maskShift]
     cUp.post(tap: .cghidEventTap)
-
-    // Press C 2 more times while keeping the modifier keys pressed
     cDown.post(tap: .cghidEventTap)
+    assertFilterSelected("filter-favorites")
     cUp.post(tap: .cghidEventTap)
     cDown.post(tap: .cghidEventTap)
+    assertFilterSelected("filter-history")
 
-    // Release all modifiers keys and assert that the popup closes.
+    cUp.post(tap: .cghidEventTap)
     let modifiersUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Shift), keyDown: false)!
     modifiersUp.flags = []
     modifiersUp.post(tap: .cghidEventTap)
 
-    assertPopupDismissed()
-    assertPasteboardStringEquals(copy2)
+    waitUntilPoppedUp()
+    assertFilterSelected("filter-history")
+    assertExists(items[copy1])
+    assertExists(items[copy2])
+    assertExists(items[copy3])
+    assertPasteboardStringEquals(copy3)
+    XCTAssertEqual(pasteboard.changeCount, pasteboardChangeCount)
   }
 
-  func testOpenAndSelectThirdItemRepeatedPress() throws {
+  func testHeldPopupShortcutIgnoresSystemKeyAutoRepeat() throws {
     copyToClipboard(copy3)
-
-    // Simulate the popup hotkey press (Cmd + Shift + C).
+    let pasteboardChangeCount = pasteboard.changeCount
     let cDown = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true)!
     cDown.flags = [.maskCommand, .maskShift]
     cDown.post(tap: .cghidEventTap)
-
     waitUntilPoppedUp()
 
-    // Press C 2 more times while keeping the modifier keys pressed
+    cDown.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
     cDown.post(tap: .cghidEventTap)
     cDown.post(tap: .cghidEventTap)
-
-    // Release all modifiers keys and assert that the popup closes.
+    cDown.post(tap: .cghidEventTap)
+    let cUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false)!
+    cUp.flags = [.maskCommand, .maskShift]
+    cUp.post(tap: .cghidEventTap)
     let modifiersUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Shift), keyDown: false)!
     modifiersUp.flags = []
     modifiersUp.post(tap: .cghidEventTap)
 
-    assertPopupDismissed()
-    assertPasteboardStringEquals(copy2)
+    waitUntilPoppedUp()
+    assertFilterSelected("filter-history")
+    assertExists(items[copy1])
+    assertExists(items[copy2])
+    assertExists(items[copy3])
+    assertPasteboardStringEquals(copy3)
+    XCTAssertEqual(pasteboard.changeCount, pasteboardChangeCount)
+  }
+
+  private func assertFilterSelected(_ identifier: String) {
+    let button = app.buttons[identifier].firstMatch
+    expectation(for: NSPredicate(format: "exists == true AND isSelected == true"), evaluatedWith: button)
+    waitForExpectations(timeout: 3)
   }
 
   func testTogglePopupAndCloseOnClickOutside() {
