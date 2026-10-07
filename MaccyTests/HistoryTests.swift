@@ -281,10 +281,10 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
 
     history.togglePin(item)
 
-    let pin = try XCTUnwrap(item.item.pin)
+    XCTAssertNotNil(item.item.pin)
     XCTAssertEqual(navigator.scrollTarget, item.id)
     XCTAssertEqual(navigator.selection.items, selection)
-    XCTAssertEqual(item.shortcuts.map(\.key), KeyShortcut.create(character: pin).map(\.key))
+    XCTAssertTrue(item.shortcuts.isEmpty)
     XCTAssertEqual(other.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
 
     navigator.scrollTarget = nil
@@ -294,6 +294,51 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
     XCTAssertEqual(navigator.scrollTarget, item.id)
     XCTAssertEqual(navigator.selection.items, selection)
     XCTAssertEqual(item.shortcuts.map(\.key), KeyShortcut.create(character: "2").map(\.key))
+  }
+
+  func testPinnedShortcutRemovalSurvivesObservationReloadAndRecopyThenUnpinRestoresNumbers() async throws {
+    let item = history.add(historyItem("Pinned shortcut lifecycle"))
+    history.togglePin(item)
+    let pin = try XCTUnwrap(item.item.pin)
+    let pinOrder = Defaults[.pinOrder]
+    XCTAssertTrue(item.shortcuts.isEmpty)
+    await drainPinObservation()
+    XCTAssertTrue(item.shortcuts.isEmpty)
+
+    try await history.load()
+    let reloaded = try XCTUnwrap(history.firstPinnedItem)
+    XCTAssertEqual(reloaded.item.pin, pin)
+    XCTAssertEqual(Defaults[.pinOrder], pinOrder)
+    XCTAssertTrue(reloaded.shortcuts.isEmpty)
+
+    let replacement = history.add(historyItem("Pinned shortcut lifecycle"))
+    XCTAssertEqual(replacement.item.pin, pin)
+    XCTAssertEqual(Defaults[.pinOrder], pinOrder)
+    XCTAssertEqual(history.pinnedItems, [replacement])
+    XCTAssertTrue(replacement.shortcuts.isEmpty)
+    await drainPinObservation()
+    XCTAssertTrue(replacement.shortcuts.isEmpty)
+
+    history.togglePin(replacement)
+    XCTAssertNil(replacement.item.pin)
+    XCTAssertEqual(replacement.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
+    await drainPinObservation()
+    XCTAssertEqual(replacement.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
+  }
+
+  func testAddingAlreadyPinnedItemDoesNotAssignLetterShortcuts() {
+    let item = historyItem("Stored pinned item")
+    item.pin = "b"
+    let added = history.add(item)
+    XCTAssertEqual(added.item.pin, "b")
+    XCTAssertTrue(added.shortcuts.isEmpty)
+    XCTAssertEqual(Defaults[.pinOrder].pins, ["b"])
+  }
+
+  private func drainPinObservation() async {
+    await withCheckedContinuation { continuation in
+      DispatchQueue.main.async { continuation.resume() }
+    }
   }
 
   func testFirstVisibleItemRespectsTopAndBottomPinPlacement() {
@@ -754,7 +799,7 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
 
 @MainActor
 final class NumericClipboardShortcutTests: XCTestCase {
-  func testNumericLabelHasOnePlainDefaultWhileModifiedAndPinnedShortcutsRemain() throws {
+  func testNumericLabelHasOnePlainDefaultWhileModifiedNumericShortcutsRemain() throws {
     let shortcuts = KeyShortcut.create(character: "1")
     let visible = shortcuts.filter { $0.isVisible(shortcuts, [.capsLock, .numericPad]) }
     XCTAssertEqual(visible.count, 1)
@@ -765,9 +810,6 @@ final class NumericClipboardShortcutTests: XCTestCase {
       XCTAssertEqual(modified.count, 1)
       XCTAssertEqual(modified.first?.modifierFlags, flags)
     }
-    let pinned = KeyShortcut.create(character: "b")
-    XCTAssertFalse(pinned.contains { $0.modifierFlags.isEmpty })
-    XCTAssertEqual(pinned.filter { $0.isVisible(pinned, []) }.first?.modifierFlags, [.command])
   }
 
   func testPlainDigitsAlwaysCopyOriginalFormatsForEveryDefaultCombination() async throws {
@@ -849,13 +891,22 @@ final class NumericClipboardShortcutTests: XCTestCase {
     }
   }
 
-  func testPinnedLettersStillRequireTheirExistingModifiers() async throws {
+  func testPinnedRowsRejectLegacyLetterShortcutsEvenWithStaleBindingsAndSearchFocus() async throws {
     try await withHistory { history in
-      XCTAssertNil(history.shortcutActivation(for: keyEvent("b"), context: .init()))
-      for flags: NSEvent.ModifierFlags in [[.command], [.option]] {
-        let activation = try XCTUnwrap(history.shortcutActivation(for: keyEvent("b", flags: flags), context: .init()))
-        XCTAssertEqual(activation.item.id, history.firstPinnedItem?.id)
-        XCTAssertEqual(activation.action, HistoryItemAction(flags))
+      let pinned = try XCTUnwrap(history.firstPinnedItem)
+      XCTAssertEqual(pinned.item.pin, "b")
+      XCTAssertTrue(pinned.shortcuts.isEmpty)
+      pinned.shortcuts = KeyShortcut.create(character: "b")
+      for context: History.ShortcutInputContext in [.init(), .init(isSearchFocused: true, isEditableText: true)] {
+        for flags: NSEvent.ModifierFlags in [[], [.command], [.option], [.option, .shift]] {
+          XCTAssertNil(history.shortcutActivation(for: keyEvent("b", flags: flags), context: context))
+        }
+      }
+      // Stale numbered bindings cannot make a pinned row steal the first ordinary row either.
+      pinned.shortcuts = KeyShortcut.create(character: "1")
+      for flags: NSEvent.ModifierFlags in [[], [.command], [.option]] {
+        XCTAssertEqual(history.shortcutActivation(for: keyEvent("1", flags: flags), context: .init())?.item.id,
+                       history.firstUnpinnedItem?.id)
       }
     }
   }

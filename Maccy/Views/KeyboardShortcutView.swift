@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct KeyboardShortcutView: View {
+  static let characterWidth: CGFloat = 12
   var shortcut: KeyShortcut?
 
   var modifiers: String {
@@ -20,7 +21,7 @@ struct KeyboardShortcutView: View {
       ForEach(Array(modifiers.unicodeScalars), id: \.self) { scalar in
           Text(String(scalar))
       }
-      Text(character).frame(width: 12, alignment: .center)
+      Text(character).frame(width: Self.characterWidth, alignment: .center)
     }
     .lineLimit(1)
     .opacity(character.isEmpty ? 0 : 0.7)

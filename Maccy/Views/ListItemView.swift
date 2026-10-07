@@ -42,6 +42,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   var attributedTitle: AttributedString?
   var shortcuts: [KeyShortcut]
   var isSelected: Bool
+  var isPinned: Bool = false
   var selectionIndex: Int?
   var help: LocalizedStringKey?
   var selectionAppearance: SelectionAppearance = .none
@@ -54,6 +55,9 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   @Default(.imageMaxHeight) private var imageMaxHeight
   @Environment(AppState.self) private var appState
   @Environment(ModifierFlags.self) private var modifierFlags
+
+  private let accessoryEdgePadding: CGFloat = 10
+  private let accessoryContentSpacing: CGFloat = 13
 
   // Use the same selection number for the visible badge and accessibility value.
   private var displaySelectionIndex: String? {
@@ -68,12 +72,13 @@ struct ListItemView<Title: View, ID: Hashable>: View {
           AppImageView(appImage: appIcon, size: NSSize(width: 15, height: 15))
           Spacer(minLength: 0)
         }
-        .padding(.leading, 4)
+        .padding(.leading, accessoryEdgePadding)
+        .padding(.trailing, accessoryContentSpacing)
         .padding(.vertical, 5)
+      } else {
+        Spacer()
+          .frame(width: accessoryEdgePadding)
       }
-
-      Spacer()
-        .frame(width: showIcons ? 5 : 10)
 
       if let accessoryImage {
         Image(nsImage: accessoryImage)
@@ -95,14 +100,12 @@ struct ListItemView<Title: View, ID: Hashable>: View {
         }
           .accessibilityIdentifier("copy-history-item")
           .accessibilityHidden(true)
-          .padding(.trailing, 5)
           .padding(.vertical, 5)
           .frame(maxWidth: .infinity, alignment: .center)
           .layoutPriority(1)
       } else if let linkPreview {
         LinkPreviewCardView(preview: linkPreview, isSelected: isSelected,
                             maximumImageHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
-          .padding(.trailing, 5)
           .padding(.vertical, 6)
           .frame(maxWidth: .infinity, alignment: .leading)
           .layoutPriority(1)
@@ -111,18 +114,17 @@ struct ListItemView<Title: View, ID: Hashable>: View {
         LinkPreviewFailureView(url: linkURL, failure: linkFailure,
                                isSelected: isSelected,
                                maxTextLines: maxTextLines, isListRow: true)
-          .padding(.trailing, 5)
           .padding(.vertical, 6)
           .frame(maxWidth: .infinity, alignment: .leading)
       } else {
         ListItemTitleView(attributedTitle: attributedTitle, maxLines: maxTextLines, title: title)
           .accessibilityHidden(true)
-          .padding(.trailing, 5)
           .padding(.vertical, maxTextLines > 1 ? 6 : 0)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
 
       Spacer()
+        .frame(width: accessoryContentSpacing)
 
       HStack(spacing: 5) {
         if let displaySelectionIndex {
@@ -138,7 +140,20 @@ struct ListItemView<Title: View, ID: Hashable>: View {
             .accessibilityHidden(true)
         }
 
-        if !shortcuts.isEmpty {
+        if isPinned {
+          // The numeral owns layout so the pin cannot add width or increase the row height.
+          Text("1")
+            .frame(width: KeyboardShortcutView.characterWidth, alignment: .center)
+            .hidden()
+            .overlay {
+              Text(Image(systemName: "pin.fill"))
+                .foregroundStyle(.red)
+                .scaleEffect(0.75)
+            }
+            .lineLimit(1)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        } else if !shortcuts.isEmpty {
           ZStack(alignment: .trailing) {
             ForEach(shortcuts) { shortcut in
               let visible = shortcut.isVisible(shortcuts, modifierFlags.flags)
@@ -151,7 +166,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
         }
       }
       .fixedSize(horizontal: true, vertical: false)
-      .padding(.trailing, 10)
+      .padding(.trailing, accessoryEdgePadding)
     }
     .frame(minHeight: Popup.itemHeight)
     .id(id)

@@ -135,7 +135,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
 
   init(_ item: HistoryItem, shortcuts: [KeyShortcut] = []) {
     self.item = item
-    self.shortcuts = shortcuts
+    self.shortcuts = item.pin == nil ? shortcuts : []
     self.title = item.title
     self.applicationImage = ApplicationImageCache.shared.getImage(item: item)
 
@@ -302,8 +302,8 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     } onChange: { [weak self] in
       DispatchQueue.main.async {
         guard let self else { return }
-        if let pin = self.item.pin {
-          self.shortcuts = KeyShortcut.create(character: pin)
+        if self.isPinned {
+          self.shortcuts = []
         }
         // History assigns numeric shortcuts when unpinning. Preserve them when
         // this observation callback runs after the history has been updated.

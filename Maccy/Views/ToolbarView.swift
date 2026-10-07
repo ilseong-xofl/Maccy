@@ -143,8 +143,7 @@ struct ToolbarView: View {
             appState.togglePin()
           }
         } label: {
-          Image(systemName: shouldUnpin ? "pin.fill" : "pin")
-            .foregroundStyle(shouldUnpin ? Color.red : .secondary)
+          Image(systemName: shouldUnpin ? "pin.slash.fill" : "pin")
         }
         .shortcutKeyHelp(
           name: .pin,

@@ -122,7 +122,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       }
     }
     guard let key, let item = items.first(where: { item in
-      item.isVisible && (!flags.isEmpty || item.isUnpinned)
+      item.isVisible && item.isUnpinned
         && item.shortcuts.contains { $0.key == key && $0.modifierFlags == flags }
     }) else { return nil }
     return ShortcutActivation(item: item, action: action)
@@ -130,7 +130,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   @MainActor
   func activateShortcut(_ shortcut: ShortcutActivation) {
-    guard shortcut.action != .unknown else { return }
+    guard shortcut.item.isUnpinned, shortcut.action != .unknown else { return }
     AppState.shared.popup.close()
     Clipboard.shared.copy(shortcut.item.item, removeFormatting: shortcut.removesFormatting)
     if shortcut.pastes { Clipboard.shared.paste() }
@@ -280,8 +280,8 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     sessionLog[Clipboard.shared.changeCount] = item
 
     let itemDecorator: HistoryItemDecorator
-    if let pin = item.pin {
-      itemDecorator = HistoryItemDecorator(item, shortcuts: KeyShortcut.create(character: pin))
+    if item.pin != nil {
+      itemDecorator = HistoryItemDecorator(item)
       if let replacedPinnedItem {
         pinManager.replace(replacedPinnedItem, with: itemDecorator)
       } else {
@@ -676,9 +676,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   private func updateShortcuts() {
     for item in pinManager.pinnedItems {
-      if let pin = item.item.pin {
-        item.shortcuts = KeyShortcut.create(character: pin)
-      }
+      item.shortcuts = []
     }
 
     updateUnpinnedShortcuts()

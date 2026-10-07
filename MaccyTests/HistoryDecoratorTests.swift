@@ -1854,11 +1854,37 @@ class ExplicitSearchKeyboardTests: XCTestCase {
     XCTAssertEqual(KeyChord(.delete, []), .unknown)
   }
 
-  func testExistingFPinDoesNotStealCommandF() {
-    let shortcuts = KeyShortcut.create(character: "f")
-    XCTAssertFalse(shortcuts.contains { $0.modifierFlags == [.command] })
-    XCTAssertTrue(shortcuts.contains { $0.modifierFlags == [.option] })
-    XCTAssertFalse(HistoryItem.supportedPins.contains("f"))
+  func testStoredFPinDoesNotReceiveAnyShortcut() throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let item = HistoryItem()
+    container.mainContext.insert(item)
+    item.pin = "f"
+    let decorator = HistoryItemDecorator(item, shortcuts: KeyShortcut.create(character: "f"))
+    XCTAssertTrue(decorator.shortcuts.isEmpty)
+    XCTAssertEqual(item.pin, "f")
+  }
+
+  func testPinObserverClearsStaleShortcutsAndPreservesRestoredNumbersOnUnpin() async throws {
+    let container = try ModelContainer(for: HistoryItem.self,
+                                      configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let item = HistoryItem()
+    container.mainContext.insert(item)
+    let numericShortcuts = KeyShortcut.create(character: "1")
+    let decorator = HistoryItemDecorator(item, shortcuts: numericShortcuts)
+
+    item.pin = "b"
+    await withCheckedContinuation { continuation in
+      DispatchQueue.main.async { continuation.resume() }
+    }
+    XCTAssertTrue(decorator.shortcuts.isEmpty)
+
+    item.pin = nil
+    decorator.shortcuts = numericShortcuts
+    await withCheckedContinuation { continuation in
+      DispatchQueue.main.async { continuation.resume() }
+    }
+    XCTAssertEqual(decorator.shortcuts.map(\.id), numericShortcuts.map(\.id))
   }
 
   func testExplicitFocusRevealsSearchEvenWhenHidden() {
