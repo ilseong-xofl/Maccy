@@ -140,42 +140,19 @@ struct ListItemView<Title: View, ID: Hashable>: View {
           .frame(width: accessoryEdgePadding)
       }
 
-      if let accessoryImage {
-        Image(nsImage: accessoryImage)
-          .accessibilityIdentifier("copy-history-item")
-          .accessibilityHidden(true)
-          .padding(.trailing, 5)
-      }
-
-      if let image {
-        Group {
-          if imageCount > 1 {
-            ListItemImageStackView(images: stackImages.isEmpty ? [image] : stackImages,
-                                   count: imageCount,
-                                   maximumHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
-          } else {
-            ListItemImageView(image: image, maximumHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
+      itemContent
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .layoutPriority(1)
+        .padding(.vertical, 8)
+        .overlay {
+          if isSelected {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .strokeBorder(Color.accentColor, lineWidth: 2)
+              // Draw into the existing accessory gap without changing text wrapping.
+              .padding(.horizontal, -4)
+              .allowsHitTesting(false)
           }
         }
-          .accessibilityIdentifier("copy-history-item")
-          .accessibilityHidden(true)
-          .frame(maxWidth: .infinity, alignment: .center)
-          .layoutPriority(1)
-      } else if let linkPreview {
-        LinkPreviewCardView(preview: linkPreview,
-                            maximumImageHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .layoutPriority(1)
-          .accessibilityHidden(true)
-      } else if let linkFailure, let linkURL {
-        LinkPreviewFailureView(url: linkURL, failure: linkFailure,
-                               maxTextLines: maxTextLines, isListRow: true)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      } else {
-        ListItemTitleView(attributedTitle: attributedTitle, maxLines: maxTextLines, title: title)
-          .accessibilityHidden(true)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
 
       Spacer()
         .frame(width: accessoryContentSpacing)
@@ -222,23 +199,15 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       .fixedSize(horizontal: true, vertical: false)
       .padding(.trailing, accessoryEdgePadding)
     }
-    .padding(.vertical, 8)
     .frame(minHeight: Popup.itemHeight)
     .id(id)
     .frame(maxWidth: .infinity, alignment: .leading)
     .foregroundStyle(.primary)
     .background(Color.white.opacity(0.001))
-    .overlay {
-      if isSelected {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .strokeBorder(Color.accentColor, lineWidth: 1.5)
-          .allowsHitTesting(false)
-      }
-    }
-    .padding(.vertical, 4)
+    .padding(.vertical, 3)
     .overlay(alignment: .bottom) {
       Rectangle()
-        .fill(Color.primary.opacity(0.16))
+        .fill(Color.primary.opacity(0.12))
         .frame(height: 1)
         .padding(.horizontal, 10)
         .allowsHitTesting(false)
@@ -248,6 +217,47 @@ struct ListItemView<Title: View, ID: Hashable>: View {
     .accessibilityAddTraits(isSelected ? .isSelected : [])
     .accessibilityValue(Text(displaySelectionIndex ?? ""))
     .help(help ?? "")
+  }
+
+  private var itemContent: some View {
+    HStack(spacing: 0) {
+      if let accessoryImage {
+        Image(nsImage: accessoryImage)
+          .accessibilityIdentifier("copy-history-item")
+          .accessibilityHidden(true)
+          .padding(.trailing, 5)
+      }
+
+      if let image {
+        Group {
+          if imageCount > 1 {
+            ListItemImageStackView(images: stackImages.isEmpty ? [image] : stackImages,
+                                   count: imageCount,
+                                   maximumHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
+          } else {
+            ListItemImageView(image: image, maximumHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
+          }
+        }
+          .accessibilityIdentifier("copy-history-item")
+          .accessibilityHidden(true)
+          .frame(maxWidth: .infinity, alignment: .center)
+          .layoutPriority(1)
+      } else if let linkPreview {
+        LinkPreviewCardView(preview: linkPreview,
+                            maximumImageHeight: CGFloat(min(max(imageMaxHeight, 1), 600)))
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .layoutPriority(1)
+          .accessibilityHidden(true)
+      } else if let linkFailure, let linkURL {
+        LinkPreviewFailureView(url: linkURL, failure: linkFailure,
+                               maxTextLines: maxTextLines, isListRow: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      } else {
+        ListItemTitleView(attributedTitle: attributedTitle, maxLines: maxTextLines, title: title)
+          .accessibilityHidden(true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
   }
 }
 
