@@ -37,13 +37,16 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   var searchQuery: String = "" {
     didSet(previousSearchQuery) {
       guard searchQuery != previousSearchQuery else { return }
+      let shouldPreserveSelection = preserveSelectionOnSearchClear && searchQuery.isEmpty
       throttler.throttle { [self] in
         updateSearchResults()
 
-        if searchQuery.isEmpty {
-          AppState.shared.navigator.select(item: firstUnpinnedItem)
-        } else {
-          AppState.shared.navigator.highlightFirst()
+        if !shouldPreserveSelection {
+          if searchQuery.isEmpty {
+            AppState.shared.navigator.select(item: firstVisibleItem)
+          } else {
+            AppState.shared.navigator.highlightFirst()
+          }
         }
 
         AppState.shared.popup.needsResize = true
@@ -76,6 +79,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   private var allUnpinnedItems: [HistoryItemDecorator] = []
   private var filteredPinnedItems: [HistoryItemDecorator] = []
   private var filteredUnpinnedItems: [HistoryItemDecorator] = []
+
+  @ObservationIgnored
+  private var preserveSelectionOnSearchClear = false
 
   @ObservationIgnored
   private var sessionLog: [Int: HistoryItem] = [:]
@@ -519,11 +525,20 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       allUnpinnedItems.removeAll { $0 == item }
     }
 
-    searchQuery = ""
-    updateUnpinnedShortcuts()
-    if item.isUnpinned {
-      AppState.shared.navigator.scrollTarget = item.id
+    clearSearchPreservingSelection()
+    updateShortcuts()
+    AppState.shared.navigator.scrollTarget = item.id
+    do {
+      try item.item.modelContext?.save()
+    } catch {
+      logger.error("Failed to save clipboard item pin state.")
     }
+  }
+
+  private func clearSearchPreservingSelection() {
+    preserveSelectionOnSearchClear = true
+    defer { preserveSelectionOnSearchClear = false }
+    searchQuery = ""
   }
 
   @MainActor

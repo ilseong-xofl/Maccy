@@ -267,6 +267,127 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
     XCTAssertFalse(history.items.contains(items[1]))
   }
 
+  func testPinAndUnpinScrollToItemAndUpdateShortcutsImmediately() throws {
+    let savedNavigator = AppState.shared.navigator
+    let navigator = NavigationManager(history: history, footer: Footer())
+    AppState.shared.navigator = navigator
+    defer { AppState.shared.navigator = savedNavigator }
+    let item = history.add(historyItem("Pinned target"))
+    let other = history.add(historyItem("Another item"))
+    navigator.selectWithoutScrolling(item: item)
+    navigator.addToSelection(item: other)
+    let selection = navigator.selection.items
+
+    history.togglePin(item)
+
+    let pin = try XCTUnwrap(item.item.pin)
+    XCTAssertEqual(navigator.scrollTarget, item.id)
+    XCTAssertEqual(navigator.selection.items, selection)
+    XCTAssertEqual(item.shortcuts.map(\.key), KeyShortcut.create(character: pin).map(\.key))
+    XCTAssertEqual(other.shortcuts.map(\.key), KeyShortcut.create(character: "1").map(\.key))
+
+    navigator.scrollTarget = nil
+    history.togglePin(item)
+
+    XCTAssertNil(item.item.pin)
+    XCTAssertEqual(navigator.scrollTarget, item.id)
+    XCTAssertEqual(navigator.selection.items, selection)
+    XCTAssertEqual(item.shortcuts.map(\.key), KeyShortcut.create(character: "2").map(\.key))
+  }
+
+  func testFirstVisibleItemRespectsTopAndBottomPinPlacement() {
+    let pinned = history.add(historyItem("Pinned item"))
+    history.togglePin(pinned)
+    let unpinned = history.add(historyItem("Latest ordinary item"))
+
+    Defaults[.pinTo] = .top
+    XCTAssertEqual(history.firstVisibleItem, pinned)
+    XCTAssertEqual(history.items.toArray(), [pinned, unpinned])
+    Defaults[.pinTo] = .bottom
+    XCTAssertEqual(history.firstVisibleItem, unpinned)
+    XCTAssertEqual(history.items.toArray(), [unpinned, pinned])
+    history.delete(unpinned)
+    XCTAssertEqual(history.firstVisibleItem, pinned)
+  }
+
+  func testOrdinarySearchClearSelectsFirstVisibleItemForPinPlacement() async throws {
+    let savedNavigator = AppState.shared.navigator
+    let navigator = NavigationManager(history: history, footer: Footer())
+    AppState.shared.navigator = navigator
+    defer { AppState.shared.navigator = savedNavigator }
+    let pinned = history.add(historyItem("Pinned item"))
+    history.togglePin(pinned)
+    let target = history.add(historyItem("Search target"))
+    let latest = history.add(historyItem("Latest ordinary item"))
+
+    for placement in [PinsPosition.top, .bottom] {
+      Defaults[.pinTo] = placement
+      history.searchQuery = "Search target"
+      try await Task.sleep(for: .milliseconds(300))
+      XCTAssertEqual(navigator.leadHistoryItem, target)
+
+      history.searchQuery = ""
+      try await Task.sleep(for: .milliseconds(300))
+
+      let expected = placement == .top ? pinned : latest
+      XCTAssertEqual(navigator.leadHistoryItem, expected)
+      XCTAssertEqual(history.firstVisibleItem, expected)
+    }
+  }
+
+  func testPinAndUnpinDuringSearchPreserveSelectionAndScrollAfterThrottle() async throws {
+    let savedNavigator = AppState.shared.navigator
+    let navigator = NavigationManager(history: history, footer: Footer())
+    AppState.shared.navigator = navigator
+    defer { AppState.shared.navigator = savedNavigator }
+    let first = history.add(historyItem("Search target first"))
+    let second = history.add(historyItem("Search target second"))
+    history.add(historyItem("Most recent item outside search"))
+    Defaults[.pinTo] = .top
+
+    for wasPinned in [false, true] {
+      history.searchQuery = "Search target"
+      try await Task.sleep(for: .milliseconds(300))
+      navigator.selectWithoutScrolling(item: first)
+      navigator.addToSelection(item: second)
+      let selection = navigator.selection.items
+      XCTAssertEqual(first.isPinned, wasPinned)
+
+      history.togglePin(first)
+      XCTAssertEqual(navigator.scrollTarget, first.id)
+      try await Task.sleep(for: .milliseconds(300))
+
+      XCTAssertTrue(history.searchQuery.isEmpty)
+      XCTAssertEqual(navigator.selection.items, selection)
+      XCTAssertEqual(navigator.leadHistoryItem, second)
+      // The hosted list may already have consumed the one-shot scroll target.
+      XCTAssertEqual(first.isPinned, !wasPinned)
+    }
+  }
+
+  func testPinChangesPersistWithoutChangingLinkSnapshotOrClipboardContents() throws {
+    let source = "https://example.com/pin-preserves-preview"
+    let item = history.add(historyItem(source))
+    item.item.contents.append(HistoryItemContent(type: NSPasteboard.PasteboardType.html.rawValue,
+                                               value: Data("<a href='\(source)'>Original link</a>".utf8)))
+    let snapshot = try linkSnapshot(for: item.item)
+    item.item.linkPreviewSnapshot = snapshot
+    let originalContents = Dictionary(uniqueKeysWithValues: item.item.contents.map { ($0.type, $0.value) })
+    let generation = item.item.linkPreviewGeneration
+
+    for shouldBePinned in [true, false] {
+      history.togglePin(item)
+
+      let reader = ModelContext(Storage.shared.container)
+      let saved = try XCTUnwrap(reader.model(for: item.item.persistentModelID) as? HistoryItem)
+      XCTAssertEqual(saved.pin != nil, shouldBePinned)
+      XCTAssertEqual(saved.linkPreviewSnapshot, snapshot)
+      XCTAssertEqual(saved.text, source)
+      XCTAssertEqual(Dictionary(uniqueKeysWithValues: saved.contents.map { ($0.type, $0.value) }), originalContents)
+      XCTAssertEqual(item.item.linkPreviewGeneration, generation)
+    }
+  }
+
   func testPinningUpdatesPinOrder() {
     let item = history.add(historyItem("foo"))
     history.togglePin(item)

@@ -123,7 +123,8 @@ struct HistoryListView: View {
           guard !Task.isCancelled else { return }
 
           if let selection = appState.navigator.scrollTarget {
-            proxy.scrollTo(selection)
+            let isPinned = appState.history.firstVisibleItem(where: { $0.id == selection })?.isPinned == true
+            proxy.scrollTo(selection, anchor: isPinned ? .top : nil)
             appState.navigator.scrollTarget = nil
           }
         }
@@ -131,7 +132,7 @@ struct HistoryListView: View {
           if scenePhase == .active {
             keyboardFocus = .list
             appState.navigator.isKeyboardNavigating = true
-            appState.navigator.select(item: appState.history.firstUnpinnedItem ?? appState.history.firstPinnedItem)
+            appState.navigator.select(item: appState.history.firstVisibleItem)
           } else {
             modifierFlags.flags = []
             appState.navigator.isKeyboardNavigating = true
