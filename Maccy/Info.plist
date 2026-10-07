@@ -30,10 +30,6 @@
 	<string>Copyright © Alexey Rodionov</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<key>SUEnableDownloaderService</key>
-	<true/>
-	<key>SUEnableInstallerLauncherService</key>
-	<true/>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 	<dict>

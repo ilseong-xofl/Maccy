@@ -5,6 +5,8 @@
 ## 통과
 
 - Debug 빌드와 선택한 XCTest 69개: 실패 0개.
+- Sparkle 제거 후 깨끗한 경로에서 Release 빌드 성공. 실제 실행과 목록 창 표시를 확인했습니다.
+- 최종 Release 앱의 `codesign --verify --deep --strict` 검증 통과. Hardened Runtime은 유지하며 Sparkle 런타임 의존성은 없습니다.
 - 짧은 텍스트에 불필요한 줄 공간을 예약하지 않는지 검증.
 - SwiftUI 실제 레이아웃으로 1·3·10줄 제한, 폭 변경에 따른 높이 변경, 긴 URL 줄바꿈 검증.
 - 원문 개행·Unicode 보존, 안전한 미리보기, 원본 바이트 유지 검증.
