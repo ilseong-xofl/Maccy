@@ -144,15 +144,6 @@ struct ListItemView<Title: View, ID: Hashable>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .layoutPriority(1)
         .padding(.vertical, 8)
-        .overlay {
-          if isSelected {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .strokeBorder(Color.accentColor, lineWidth: 2)
-              // Draw into the existing accessory gap without changing text wrapping.
-              .padding(.horizontal, -4)
-              .allowsHitTesting(false)
-          }
-        }
 
       Spacer()
         .frame(width: accessoryContentSpacing)
@@ -204,6 +195,13 @@ struct ListItemView<Title: View, ID: Hashable>: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .foregroundStyle(.primary)
     .background(Color.white.opacity(0.001))
+    .overlay {
+      if isSelected {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .strokeBorder(Color.accentColor, lineWidth: 3)
+          .allowsHitTesting(false)
+      }
+    }
     .padding(.vertical, 3)
     .overlay(alignment: .bottom) {
       Rectangle()
