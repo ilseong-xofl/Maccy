@@ -7,7 +7,7 @@
 "Pin" = "Prisegti:";
 "PinTooltip" = "Spartusis klavišas istorijos elementui prisegti.\nNumatytasis spartusis klavišas: ⌥P.";
 "Delete" = "Ištrinti:";
-"DeleteTooltip" = "Spartusis klavišas istorijos elementui ištrinti.\nNumatytasis spartusis klavišas: ⌥⌫.";
+"DeleteTooltip" = "Spartusis klavišas istorijos elementui ištrinti.\nNumatytasis spartusis klavišas: ⌫.";
 "ShowPreview" = "Peržiūra:";
 "ShowPreviewTooltip" = "Rodyti peržiūrą su papildoma informacija.\nNumatytasis spartusis klavišas: ⌃Space.";
 "Behavior" = "Elgsena:";

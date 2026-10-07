@@ -7,7 +7,7 @@
 "Pin" = "Kitűzés:";
 "PinTooltip" = "Gyorsbillentyű az előzmény elem kitűzéséhez.\nAlapértelmezett: ⌥P.";
 "Delete" = "Törlés:";
-"DeleteTooltip" = "Gyorsbillentyű az előzmény elem törléséhez.\nAlapértelmezett: ⌥⌫.";
+"DeleteTooltip" = "Gyorsbillentyű az előzmény elem törléséhez.\nAlapértelmezett: ⌫.";
 "ShowPreview" = "Előnézet:";
 "ShowPreviewTooltip" = "Előnézet megjelenítése további információkkal.\nAlapértelmezett: ⌃Space.";
 "Behavior" = "Viselkedés:";

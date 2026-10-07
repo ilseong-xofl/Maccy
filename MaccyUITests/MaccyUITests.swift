@@ -68,7 +68,7 @@ class MaccyUITests: XCTestCase {
     app.launchArguments.append("enable-testing")
     setKeyboardShortcut("popup", keyCode: kVK_ANSI_C, modifiers: cmdKey | shiftKey)
     setKeyboardShortcut("pin", keyCode: kVK_ANSI_P, modifiers: optionKey)
-    setKeyboardShortcut("delete", keyCode: kVK_Delete, modifiers: optionKey)
+    setKeyboardShortcut("delete", keyCode: kVK_Delete, modifiers: 0)
     setKeyboardShortcut("togglePreview", keyCode: kVK_Space, modifiers: controlKey)
     app.launch()
 
@@ -238,7 +238,7 @@ class MaccyUITests: XCTestCase {
 
   func testDeleteEntry() {
     popUpWithMouse()
-    app.typeKey(.delete, modifierFlags: [.option])
+    app.typeKey(.delete, modifierFlags: [])
     assertNotExists(items[copy1])
 
     app.typeKey(.escape, modifierFlags: [])
@@ -249,12 +249,34 @@ class MaccyUITests: XCTestCase {
   func testDeleteEntryDuringSearch() {
     popUpWithMouse()
     search(copy2)
-    app.typeKey(.delete, modifierFlags: [.option])
+    app.typeKey(.delete, modifierFlags: [])
+    waitForSearch()
+    assertSearchFieldValue(String(copy2.dropLast()))
+    assertExists(items[copy2])
+
+    // Escape returns focus to the list; only then does Backspace delete an item.
+    app.typeKey(.escape, modifierFlags: [])
+    app.typeKey(.delete, modifierFlags: [])
     assertNotExists(items[copy2])
 
     app.typeKey(.escape, modifierFlags: [])
     popUpWithMouse()
     assertNotExists(items[copy2])
+  }
+
+  func testDeleteEntryFromPreview() {
+    popUpWithMouse()
+    app.typeKey(" ", modifierFlags: [])
+    let previewWindow = app.windows["MaccyPreview.detached-preview"]
+    assertExists(previewWindow)
+
+    app.typeKey(.delete, modifierFlags: [])
+
+    assertNotExists(items[copy1])
+    assertExists(items[copy2])
+    app.typeKey(.escape, modifierFlags: [])
+    assertNotExists(previewWindow)
+    assertExists(items[copy2])
   }
 
   func testClear() {
@@ -711,6 +733,7 @@ class MaccyUITests: XCTestCase {
   }
 
   private func search(_ string: String) {
+    app.typeKey("f", modifierFlags: [.command])
     // NOTE: app.typeText is broken in Sonoma and causes some
     //       Chars to be submitted with a .command mask (e.g. 'p', 'k' or 'j')
     string.forEach {

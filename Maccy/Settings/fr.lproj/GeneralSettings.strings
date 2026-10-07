@@ -7,7 +7,7 @@
 "Pin" = "Épingler :";
 "PinTooltip" = "Touche de raccourci pour épingler un élément de l’historique.\nPar défaut : ⌥P.";
 "Delete" = "Supprimer :";
-"DeleteTooltip" = "Touche de raccourci pour supprimer un élément de l’historique.\nPar défaut : ⌥⌫.";
+"DeleteTooltip" = "Touche de raccourci pour supprimer un élément de l’historique.\nPar défaut : ⌫.";
 "ShowPreview" = "Aperçu :";
 "ShowPreviewTooltip" = "Afficher l'aperçu avec des informations supplémentaires.\nPar défaut : ⌃Space.";
 "Behavior" = "Comportement :";

@@ -7,7 +7,7 @@
 "Pin" = "Pin:";
 "PinTooltip" = "Sneltoets om geschiedenisitem vast te zetten.\nStandaard: ⌥P.";
 "Delete" = "Verwijder:";
-"DeleteTooltip" = "Sneltoets om geschiedenisitem te verwijderen.\nStandaard: ⌥⌫.";
+"DeleteTooltip" = "Sneltoets om geschiedenisitem te verwijderen.\nStandaard: ⌫.";
 "ShowPreview" = "Voorbeeld:";
 "ShowPreviewTooltip" = "Voorbeeld weergeven met aanvullende informatie.\nStandaard: ⌃Space.";
 "Behavior" = "Gedrag:";

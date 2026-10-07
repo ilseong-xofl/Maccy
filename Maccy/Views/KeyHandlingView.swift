@@ -60,6 +60,7 @@ struct KeyHandlingView<Content: View>: View {
           searchQuery = ""
           return .handled
         case .deleteCurrentItem:
+          guard keyboardFocus != .search else { return .ignored }
           if appState.navigator.pasteStackSelected {
             appState.removePasteStack()
           } else {

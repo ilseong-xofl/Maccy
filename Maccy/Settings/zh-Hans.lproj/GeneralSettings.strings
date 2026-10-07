@@ -7,7 +7,7 @@
 "Pin" = "置顶：";
 "PinTooltip" = "置顶历史记录项的快捷键。\n默认：⌥P。";
 "Delete" = "删除：";
-"DeleteTooltip" = "删除历史记录项的快捷键。\n默认：⌥⌫。";
+"DeleteTooltip" = "删除历史记录项的快捷键。\n默认：⌫。";
 "ShowPreview" = "预览：";
 "ShowPreviewTooltip" = "显示带有附加信息的预览。\n默认：⌃Space。";
 "Behavior" = "行为:";

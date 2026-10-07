@@ -7,7 +7,7 @@
 "Pin" = "Připnout:";
 "PinTooltip" = "Klávesová zkratka pro připnutí položky.\nVýchozí: ⌥P.";
 "Delete" = "Smazat:";
-"DeleteTooltip" = "Klávesová zkratka pro smazání položky historie.\nVýchozí: ⌥⌫.";
+"DeleteTooltip" = "Klávesová zkratka pro smazání položky historie.\nVýchozí: ⌫.";
 "ShowPreview" = "Náhled:";
 "ShowPreviewTooltip" = "Zobrazit náhled s dodatečnými informacemi.\nVýchozí: ⌃Space.";
 "Behavior" = "Chování:";

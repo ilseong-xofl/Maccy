@@ -7,7 +7,7 @@
 "Pin" = "ピン:";
 "PinTooltip" = "履歴項目を固定するショートカット キー。\nデフォルト：⌥P.";
 "Delete" = "デリート:";
-"DeleteTooltip" = "履歴項目を削除するショートカット キー。\nデフォルト：⌥⌫。";
+"DeleteTooltip" = "履歴項目を削除するショートカット キー。\nデフォルト：⌫。";
 "ShowPreview" = "プレビュー:";
 "ShowPreviewTooltip" = "追加情報付きのプレビューを表示します。\nデフォルト：⌃Space。";
 "Behavior" = "動作:";

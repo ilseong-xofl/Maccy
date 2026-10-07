@@ -7,7 +7,7 @@
 "Pin" = "Piespraust:";
 "PinTooltip" = "Īsinājumtaustiņš, lai piespraust vēstures vienumu.\nNoklusējums: ⌥P.";
 "Delete" = "Dzēst:";
-"DeleteTooltip" = "Īsinājumtaustiņš vēstures vienuma dzēšanai.\nNoklusējums: ⌥ ⌫.";
+"DeleteTooltip" = "Īsinājumtaustiņš vēstures vienuma dzēšanai.\nNoklusējums: ⌫.";
 "ShowPreview" = "Priekšskatījums:";
 "ShowPreviewTooltip" = "Rādīt priekšskatījumu ar papildu informāciju.\nNoklusējums: ⌃Space.";
 "Behavior" = "Rīcība:";

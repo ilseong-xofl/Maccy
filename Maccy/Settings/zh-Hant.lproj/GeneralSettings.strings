@@ -7,7 +7,7 @@
 "Pin" = "釘選：";
 "PinTooltip" = "釘選歷史記錄項目的快捷鍵。\n預設：⌥P。";
 "Delete" = "刪除：";
-"DeleteTooltip" = "刪除歷史記錄項目的快捷鍵。\n預設：⌥⌫。";
+"DeleteTooltip" = "刪除歷史記錄項目的快捷鍵。\n預設：⌫。";
 "ShowPreview" = "預覽：";
 "ShowPreviewTooltip" = "顯示帶有附加資訊的預覽。\n預設：⌃Space。";
 "Behavior" = "行為：";

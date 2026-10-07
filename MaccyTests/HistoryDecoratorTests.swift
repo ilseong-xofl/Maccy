@@ -1,5 +1,6 @@
 import XCTest
 import Defaults
+import KeyboardShortcuts
 import SwiftUI
 import Sauce
 @testable import Maccy
@@ -1094,11 +1095,56 @@ class ExplicitSearchKeyboardTests: XCTestCase {
   }
 
   func testSpacePreviewsAndCommandFFocusesSearch() {
+    let savedDeleteShortcut = KeyboardShortcuts.getShortcut(for: .delete)
+    defer { KeyboardShortcuts.setShortcut(savedDeleteShortcut, for: .delete) }
+    KeyboardShortcuts.setShortcut(.init(.delete, modifiers: []), for: .delete)
+
     XCTAssertEqual(KeyChord(.space, []), .spacePreview)
     XCTAssertEqual(KeyChord(.f, [.command]), .focusSearch)
     XCTAssertEqual(KeyChord(.f, []), .unknown)
-    XCTAssertEqual(KeyChord(.delete, []), .unknown)
+    XCTAssertEqual(KeyChord(.delete, []), .deleteCurrentItem)
+    XCTAssertEqual(KeyChord(.delete, [.option]), .ignored)
+    XCTAssertEqual(KeyChord(.delete, [.command, .option]), .clearHistory)
     XCTAssertEqual(KeyChord(.escape, []), .close)
+  }
+
+  func testDeleteShortcutDefaultsToBackspace() {
+    XCTAssertEqual(KeyboardShortcuts.Name.delete.initialShortcut, .init(.delete, modifiers: []))
+  }
+
+  func testLegacyDeleteShortcutMigratesToBackspace() {
+    let savedDeleteShortcut = KeyboardShortcuts.getShortcut(for: .delete)
+    defer { KeyboardShortcuts.setShortcut(savedDeleteShortcut, for: .delete) }
+    KeyboardShortcuts.setShortcut(.init(.delete, modifiers: [.option]), for: .delete)
+
+    KeyboardShortcuts.Name.migrateDeleteShortcutToBackspace()
+
+    XCTAssertEqual(KeyboardShortcuts.getShortcut(for: .delete), .init(.delete, modifiers: []))
+    XCTAssertEqual(KeyChord(.delete, []), .deleteCurrentItem)
+  }
+
+  func testDeleteShortcutMigrationPreservesCustomShortcut() {
+    let savedDeleteShortcut = KeyboardShortcuts.getShortcut(for: .delete)
+    defer { KeyboardShortcuts.setShortcut(savedDeleteShortcut, for: .delete) }
+    let customShortcut = KeyboardShortcuts.Shortcut(.d, modifiers: [.control])
+    KeyboardShortcuts.setShortcut(customShortcut, for: .delete)
+
+    KeyboardShortcuts.Name.migrateDeleteShortcutToBackspace()
+
+    XCTAssertEqual(KeyboardShortcuts.getShortcut(for: .delete), customShortcut)
+    XCTAssertEqual(KeyChord(.d, [.control]), .deleteCurrentItem)
+    XCTAssertEqual(KeyChord(.delete, []), .unknown)
+  }
+
+  func testDeleteShortcutMigrationPreservesDisabledShortcut() {
+    let savedDeleteShortcut = KeyboardShortcuts.getShortcut(for: .delete)
+    defer { KeyboardShortcuts.setShortcut(savedDeleteShortcut, for: .delete) }
+    KeyboardShortcuts.setShortcut(nil, for: .delete)
+
+    KeyboardShortcuts.Name.migrateDeleteShortcutToBackspace()
+
+    XCTAssertNil(KeyboardShortcuts.getShortcut(for: .delete))
+    XCTAssertEqual(KeyChord(.delete, []), .unknown)
   }
 
   func testExistingFPinDoesNotStealCommandF() {

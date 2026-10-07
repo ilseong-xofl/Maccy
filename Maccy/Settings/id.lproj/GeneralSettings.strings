@@ -7,7 +7,7 @@
 "Pin" = "Sematkan:";
 "PinTooltip" = "Tombol pintasan untuk menyematkan item riwayat.\nBawaan: ⌥P.";
 "Delete" = "Hapus:";
-"DeleteTooltip" = "Tombol pintasan untuk menghapus item riwayat.\nBawaan: ⌥⌫.";
+"DeleteTooltip" = "Tombol pintasan untuk menghapus item riwayat.\nBawaan: ⌫.";
 "ShowPreview" = "Pratinjau:";
 "ShowPreviewTooltip" = "Tampilkan pratinjau dengan informasi tambahan.\nDefault: ⌃Space.";
 "Behavior" = "Perilaku:";

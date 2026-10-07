@@ -7,7 +7,7 @@
 "Pin" = "핀:";
 "PinTooltip" = "고정 기록 항목에 대한 단축키입니다.\n기본값: ⌥P.";
 "Delete" = "삭제:";
-"DeleteTooltip" = "기록 항목 삭제 단축키입니다.\n기본값: ⌥⌫.";
+"DeleteTooltip" = "기록 항목 삭제 단축키입니다.\n기본값: ⌫.";
 "ShowPreview" = "미리보기:";
 "PreviewSpaceShortcut" = "Space (항목 탐색 중)";
 "PreviewSpaceShortcutHelp" = "Space로 선택한 항목의 미리보기를 열거나 닫습니다. 검색하려면 먼저 검색창을 클릭하거나 ⌘F를 누르세요. 검색창에 포커스가 있을 때는 Space로 공백을 입력합니다.";

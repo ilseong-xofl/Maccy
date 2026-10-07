@@ -7,7 +7,7 @@
 "Pin" = "Prikačiti:";
 "PinTooltip" = "Tipka prečaca za prikvačivanje stavke povijesti.\nStandardno: ⌥P.";
 "Delete" = "Izbrisati:";
-"DeleteTooltip" = "Tipka prečaca za brisanje stavke povijesti.\nStandardno: ⌥⌫.";
+"DeleteTooltip" = "Tipka prečaca za brisanje stavke povijesti.\nStandardno: ⌫.";
 "ShowPreview" = "Pregled:";
 "ShowPreviewTooltip" = "Prikaži pregled s dodatnim informacijama.\nStandardno: ⌃Space.";
 "Behavior" = "Ponašanje:";
